@@ -1,0 +1,78 @@
+<%- include('partials/header', { title: 'User: ' + user.Username, active: 'users', authUser }) %>
+
+<div class="card">
+  <h2 style="margin-top:0;">Profile</h2>
+  <form method="post" action="/admin-ui/users/<%= user.UserId %>">
+    <label>Display name</label>
+    <input type="text" name="displayName" value="<%= user.DisplayName || '' %>" />
+    <label>Email</label>
+    <input type="email" name="email" value="<%= user.Email %>" />
+    <label style="display:inline-flex;align-items:center;gap:6px;margin-top:14px;">
+      <input type="checkbox" name="isActive" value="true" <%= user.IsActive ? 'checked' : '' %> style="width:auto;" /> Active
+    </label>
+    <br/>
+    <label style="display:inline-flex;align-items:center;gap:6px;">
+      <input type="checkbox" name="isLocked" value="true" <%= user.IsLocked ? 'checked' : '' %> style="width:auto;" /> Locked
+    </label>
+    <div><button type="submit" style="margin-top:14px;">Save profile</button></div>
+  </form>
+  <p class="muted">Failed login attempts: <%= user.FailedLoginCount %> · Created <%= new Date(user.CreatedAt).toLocaleString() %> · Last login <%= user.LastLoginAt ? new Date(user.LastLoginAt).toLocaleString() : 'never' %></p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Reset password</h2>
+  <form method="post" action="/admin-ui/users/<%= user.UserId %>/reset-password">
+    <label>New password</label>
+    <input type="password" name="password" required minlength="8" />
+    <button type="submit" style="margin-top:14px;">Reset password</button>
+  </form>
+  <p class="muted">Also invalidates every existing session for this user (bumps TokenValidAfter).</p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Roles</h2>
+  <p class="muted">Toggling a role here changes what this user can do across every app immediately (next re-verify, ≤5 min).</p>
+  <% allRoles.forEach(function(r) { %>
+    <label style="display:inline-flex;align-items:center;gap:6px;margin-right:18px;">
+      <input type="checkbox" class="role-toggle" data-role-id="<%= r.RoleId %>" <%= roleIds.includes(r.RoleId) ? 'checked' : '' %> style="width:auto;" />
+      <%= r.Name %><% if (r.IsFullAccess) { %> <span class="badge role">full access</span><% } %>
+    </label>
+  <% }) %>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Groups</h2>
+  <% allGroups.forEach(function(g) { %>
+    <label style="display:inline-flex;align-items:center;gap:6px;margin-right:18px;">
+      <input type="checkbox" class="group-toggle" data-group-id="<%= g.GroupId %>" <%= groupIds.includes(g.GroupId) ? 'checked' : '' %> style="width:auto;" />
+      <%= g.Name %>
+    </label>
+  <% }) %>
+  <% if (allGroups.length === 0) { %><p class="muted">No groups yet — create one on the Groups tab.</p><% } %>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Sessions</h2>
+  <p class="muted">Force this user's access to end everywhere within one re-verify cycle in every app, without waiting for their token to expire.</p>
+  <form method="post" action="/admin-ui/users/<%= user.UserId %>/force-logout" onsubmit="return confirm('Force logout everywhere for this user?');">
+    <button type="submit" class="danger">Force logout everywhere</button>
+  </form>
+</div>
+
+<script>
+  function toggle(el, url, idField) {
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [idField]: Number(el.dataset[idField === 'roleId' ? 'roleId' : 'groupId']), action: el.checked ? 'add' : 'remove' }),
+    }).then(function (r) { if (!r.ok) { alert('Failed to update.'); location.reload(); } });
+  }
+  document.querySelectorAll('.role-toggle').forEach(function (el) {
+    el.addEventListener('change', function () { toggle(el, '/admin-ui/users/<%= user.UserId %>/roles', 'roleId'); });
+  });
+  document.querySelectorAll('.group-toggle').forEach(function (el) {
+    el.addEventListener('change', function () { toggle(el, '/admin-ui/users/<%= user.UserId %>/groups', 'groupId'); });
+  });
+</script>
+
+<%- include('partials/footer') %>

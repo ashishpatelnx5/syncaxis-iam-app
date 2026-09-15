@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title><%= title %> · Syncaxis IAM Admin</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; background: #f5f6f7; color: #1a1a1a; }
+  header.topbar { background: #2c3e50; color: #fff; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+  header.topbar a { color: #fff; text-decoration: none; }
+  header.topbar .brand { font-weight: 600; font-size: 15px; }
+  nav.tabs { display: flex; gap: 4px; background: #34495e; padding: 0 24px; }
+  nav.tabs a { color: #d7dde3; text-decoration: none; padding: 10px 14px; font-size: 13.5px; border-bottom: 3px solid transparent; }
+  nav.tabs a.active { color: #fff; border-bottom-color: #4aa3ff; }
+  main { max-width: 1100px; margin: 24px auto; padding: 0 24px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; color: #34495e; margin: 28px 0 10px; }
+  .muted { color: #667; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; font-size: 13.5px; }
+  th, td { border: 1px solid #e1e4e8; padding: 7px 10px; text-align: left; vertical-align: middle; }
+  th { background: #eef1f4; font-weight: 600; }
+  tr:hover td { background: #f9fbfd; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; margin: 1px; }
+  .badge.role { background: #e3f0ff; color: #1959a8; }
+  .badge.active { background: #e3f7e9; color: #1b7a37; }
+  .badge.inactive { background: #f1f1f1; color: #666; }
+  .badge.locked { background: #fde8e8; color: #b02a2a; }
+  form.inline { display: inline; }
+  .card { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 16px 20px; margin-bottom: 16px; }
+  .stat-row { display: flex; gap: 16px; margin-bottom: 20px; }
+  .stat { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 14px 18px; min-width: 140px; }
+  .stat .n { font-size: 24px; font-weight: 700; }
+  .stat .l { font-size: 12px; color: #667; }
+  label { display: block; font-size: 12.5px; font-weight: 600; margin: 10px 0 4px; color: #34495e; }
+  input[type=text], input[type=email], input[type=password], select { width: 100%; max-width: 360px; padding: 7px 9px; border: 1px solid #ccd2d8; border-radius: 4px; font-size: 13.5px; }
+  button, input[type=submit] { background: #2c3e50; color: #fff; border: none; padding: 7px 16px; border-radius: 4px; font-size: 13px; cursor: pointer; }
+  button.secondary { background: #eef1f4; color: #2c3e50; }
+  button.danger { background: #c0392b; }
+  button:hover { opacity: 0.9; }
+  .error { background: #fde8e8; color: #a02020; padding: 8px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 12px; }
+  .perm-matrix td.app-header { background: #2c3e50; color: #fff; font-weight: 600; }
+  .perm-matrix input[type=checkbox] { width: 16px; height: 16px; }
+  a.button-link { display: inline-block; background: #2c3e50; color: #fff; text-decoration: none; padding: 6px 14px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">Syncaxis IAM Admin</span>
+  <span>
+    <% if (typeof authUser !== 'undefined' && authUser) { %>
+      <a href="/admin-ui/account" style="color:#fff;<%= active === 'account' ? 'text-decoration:underline;' : '' %>"><%= authUser.displayName %></a> &nbsp;
+      <form class="inline" method="post" action="/admin-ui/logout"><button class="secondary" type="submit">Log out</button></form>
+    <% } %>
+  </span>
+</header>
+<% if (typeof authUser !== 'undefined' && authUser) { %>
+<nav class="tabs">
+  <a href="/admin-ui" class="<%= active === 'dashboard' ? 'active' : '' %>">Dashboard</a>
+  <a href="/admin-ui/users" class="<%= active === 'users' ? 'active' : '' %>">Users</a>
+  <a href="/admin-ui/roles" class="<%= active === 'roles' ? 'active' : '' %>">Roles</a>
+  <a href="/admin-ui/groups" class="<%= active === 'groups' ? 'active' : '' %>">Groups</a>
+  <a href="/admin-ui/apps" class="<%= active === 'apps' ? 'active' : '' %>">Apps &amp; Permissions</a>
+  <a href="/admin-ui/audit" class="<%= active === 'audit' ? 'active' : '' %>">Audit Log</a>
+</nav>
+<% } %>
+<main>
+<h1><%= title %></h1>

@@ -1,0 +1,76 @@
+<%- include('partials/header', { title: 'Group: ' + group.Name, active: 'groups', authUser }) %>
+
+<div class="card">
+  <h2 style="margin-top:0;">Details</h2>
+  <form method="post" action="/admin-ui/groups/<%= group.GroupId %>">
+    <label>Name</label>
+    <input type="text" name="name" value="<%= group.Name %>" required />
+    <label>Description</label>
+    <input type="text" name="description" value="<%= group.Description || '' %>" />
+    <div><button type="submit" style="margin-top:16px;">Save</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Roles granted to this group</h2>
+  <p class="muted">Every member gets these roles on top of whatever they hold directly.</p>
+  <% allRoles.forEach(function(r) { %>
+    <label style="display:inline-flex;align-items:center;gap:6px;margin-right:18px;">
+      <input type="checkbox" class="role-toggle" data-role-id="<%= r.RoleId %>" <%= roleIds.includes(r.RoleId) ? 'checked' : '' %> style="width:auto;" />
+      <%= r.Name %>
+    </label>
+  <% }) %>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Members (<%= members.length %>)</h2>
+  <% if (members.length === 0) { %>
+    <p class="muted">No members yet — add this group to a user from that user's page.</p>
+  <% } else { %>
+    <table>
+      <thead><tr><th>Username</th><th>Display name</th><th></th></tr></thead>
+      <tbody>
+      <% members.forEach(function(m) { %>
+        <tr>
+          <td><a href="/admin-ui/users/<%= m.UserId %>"><%= m.Username %></a></td>
+          <td><%= m.DisplayName || '' %></td>
+          <td><button type="button" class="secondary member-remove" data-user-id="<%= m.UserId %>">Remove</button></td>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+  <p class="muted">Add a member from that user's own page (Users &gt; pick a user &gt; Groups).</p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Delete group</h2>
+  <p class="muted">Members keep any roles they hold directly — they only lose what this group itself grants them.</p>
+  <form method="post" action="/admin-ui/groups/<%= group.GroupId %>/delete" onsubmit="return confirm('Delete this group? This cannot be undone.');">
+    <button type="submit" class="danger">Delete group</button>
+  </form>
+</div>
+
+<script>
+  document.querySelectorAll('.role-toggle').forEach(function (el) {
+    el.addEventListener('change', function () {
+      fetch('/admin-ui/groups/<%= group.GroupId %>/roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roleId: Number(el.dataset.roleId), action: el.checked ? 'add' : 'remove' }),
+      }).then(function (r) { if (!r.ok) { alert('Failed to update.'); location.reload(); } });
+    });
+  });
+  document.querySelectorAll('.member-remove').forEach(function (el) {
+    el.addEventListener('click', function () {
+      if (!confirm('Remove this member from the group?')) return;
+      fetch('/admin-ui/groups/<%= group.GroupId %>/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: Number(el.dataset.userId), action: 'remove' }),
+      }).then(function (r) { if (r.ok) location.reload(); else alert('Failed to remove.'); });
+    });
+  });
+</script>
+
+<%- include('partials/footer') %>

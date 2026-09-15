@@ -1,0 +1,47 @@
+<%- include('partials/header', { title: 'Role: ' + role.Name, active: 'roles', authUser }) %>
+
+<p class="muted">Toggling a checkbox updates <code>RolePermissions</code> immediately for every user (directly or via a group) holding this role.</p>
+
+<% appsGrouped.forEach(function(app) { %>
+  <div class="card">
+    <h2 style="margin-top:0;"><%= app.appName %></h2>
+    <table class="perm-matrix">
+      <thead>
+        <tr>
+          <th>Module</th>
+          <% app.actions.forEach(function(action) { %><th><%= action %></th><% }) %>
+        </tr>
+      </thead>
+      <tbody>
+      <% app.modules.forEach(function(mod) { %>
+        <tr>
+          <td><%= mod.modulePath %></td>
+          <% app.actions.forEach(function(action) { %>
+            <td>
+              <% var cell = mod.cells[action]; %>
+              <% if (cell) { %>
+                <input type="checkbox" class="perm-toggle" data-permission-id="<%= cell.permissionId %>" <%= cell.granted ? 'checked' : '' %> />
+              <% } %>
+            </td>
+          <% }) %>
+        </tr>
+      <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% }) %>
+<% if (appsGrouped.length === 0) { %><p class="muted">No apps have registered any permission keys yet.</p><% } %>
+
+<script>
+  document.querySelectorAll('.perm-toggle').forEach(function (el) {
+    el.addEventListener('change', function () {
+      fetch('/admin-ui/roles/<%= role.RoleId %>/permissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permissionId: Number(el.dataset.permissionId), action: el.checked ? 'add' : 'remove' }),
+      }).then(function (r) { if (!r.ok) { alert('Failed to update.'); location.reload(); } });
+    });
+  });
+</script>
+
+<%- include('partials/footer') %>

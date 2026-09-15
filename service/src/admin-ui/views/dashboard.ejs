@@ -1,0 +1,26 @@
+<%- include('partials/header', { title: 'Dashboard', active: 'dashboard', authUser }) %>
+
+<div class="stat-row">
+  <div class="stat"><div class="n"><%= counts.activeUsers %></div><div class="l">Active users</div></div>
+  <div class="stat"><div class="n"><%= counts.roles %></div><div class="l">Roles</div></div>
+  <div class="stat"><div class="n"><%= counts.apps %></div><div class="l">Registered apps</div></div>
+</div>
+
+<h2>Recent audit events</h2>
+<table>
+  <thead><tr><th>When</th><th>Event</th><th>User</th><th>App</th><th>Detail</th></tr></thead>
+  <tbody>
+  <% recentAudit.forEach(function(e) { %>
+    <tr>
+      <td class="muted"><%= new Date(e.CreatedAt).toLocaleString() %></td>
+      <td><%= e.EventType %></td>
+      <td><%= e.Username || '—' %></td>
+      <td><%= e.AppKey || '—' %></td>
+      <td class="muted"><%= e.Detail || '' %></td>
+    </tr>
+  <% }) %>
+  <% if (recentAudit.length === 0) { %><tr><td colspan="5" class="muted">No audit events yet.</td></tr><% } %>
+  </tbody>
+</table>
+
+<%- include('partials/footer') %>

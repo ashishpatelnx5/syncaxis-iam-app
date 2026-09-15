@@ -1,0 +1,19 @@
+<%- include('partials/header', { title: 'New user', active: 'users', authUser }) %>
+
+<% if (typeof error !== 'undefined' && error) { %><div class="error"><%= error %></div><% } %>
+
+<div class="card">
+  <form method="post" action="/admin-ui/users/new">
+    <label>Username</label>
+    <input type="text" name="username" required />
+    <label>Email</label>
+    <input type="email" name="email" required />
+    <label>Display name</label>
+    <input type="text" name="displayName" />
+    <label>Initial password</label>
+    <input type="password" name="password" required minlength="8" />
+    <button type="submit" style="margin-top:16px;">Create user</button>
+  </form>
+</div>
+
+<%- include('partials/footer') %>

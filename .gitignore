@@ -1,0 +1,20 @@
+# Dependencies & build output
+node_modules/
+dist/
+
+# Secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+
+# One-time migration artifact — contains real usernames/internal IDs,
+# not meant for version control (see migrate-portal-users.ts)
+migration-output/

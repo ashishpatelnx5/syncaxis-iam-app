@@ -1,0 +1,28 @@
+<%- include('partials/header', { title: 'Groups', active: 'groups', authUser }) %>
+
+<div class="card">
+  <form method="post" action="/admin-ui/groups">
+    <label style="display:inline-block;margin-right:12px;">Name <input type="text" name="name" required /></label>
+    <label style="display:inline-block;">Description <input type="text" name="description" /></label>
+    <button type="submit" style="margin-left:8px;">Create group</button>
+  </form>
+</div>
+
+<table>
+  <thead><tr><th>Name</th><th>Description</th><th>Members</th><th>Roles granted</th><th></th></tr></thead>
+  <tbody>
+  <% groups.forEach(function(g) { %>
+    <tr>
+      <td><%= g.Name %></td>
+      <td class="muted"><%= g.Description || '' %></td>
+      <td><%= g.MemberCount %></td>
+      <td><%= g.RoleCount %></td>
+      <td><a href="/admin-ui/groups/<%= g.GroupId %>">Manage</a></td>
+    </tr>
+  <% }) %>
+  <% if (groups.length === 0) { %><tr><td colspan="5" class="muted">No groups yet.</td></tr><% } %>
+  </tbody>
+</table>
+<p class="muted">Add a member to a group from that user's own page (Users &gt; pick a user &gt; Groups).</p>
+
+<%- include('partials/footer') %>

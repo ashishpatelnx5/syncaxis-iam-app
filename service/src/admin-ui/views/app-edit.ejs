@@ -1,0 +1,25 @@
+<%- include('partials/header', { title: 'Edit app: ' + app.Key, active: 'apps', authUser }) %>
+
+<% if (typeof error !== 'undefined' && error) { %><div class="error"><%= error %></div><% } %>
+
+<div class="card">
+  <form method="post" action="/admin-ui/apps/<%= app.Key %>/edit">
+    <label>Key</label>
+    <input type="text" value="<%= app.Key %>" disabled />
+    <p class="muted" style="margin:4px 0 0;">Immutable — every permission key this app has declared is namespaced under it (e.g. <code><%= app.Key %>.leads.view</code>). Register a new app instead if this needs to change.</p>
+
+    <label>Name</label>
+    <input type="text" name="name" value="<%= app.Name %>" required />
+
+    <label>Base URL</label>
+    <input type="text" name="baseUrl" value="<%= app.BaseUrl || '' %>" placeholder="https://..." />
+
+    <label style="display:inline-flex;align-items:center;gap:6px;margin-top:14px;">
+      <input type="checkbox" name="isActive" value="true" <%= app.IsActive ? 'checked' : '' %> style="width:auto;" /> Active
+    </label>
+
+    <div><button type="submit" style="margin-top:16px;">Save</button> <a href="/admin-ui/apps" class="muted" style="margin-left:10px;">Cancel</a></div>
+  </form>
+</div>
+
+<%- include('partials/footer') %>

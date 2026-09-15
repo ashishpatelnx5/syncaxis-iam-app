@@ -1,0 +1,32 @@
+<%- include('partials/header', { title: 'My Account', active: 'account', authUser }) %>
+
+<% if (typeof notice !== 'undefined' && notice) { %><div class="card" style="background:#e3f7e9;border-color:#bfe8c9;"><%= notice %></div><% } %>
+<% if (typeof error !== 'undefined' && error) { %><div class="error"><%= error %></div><% } %>
+
+<div class="card">
+  <h2 style="margin-top:0;">Profile</h2>
+  <form method="post" action="/admin-ui/account">
+    <label>Username</label>
+    <input type="text" value="<%= account.Username %>" disabled />
+    <label>Display name</label>
+    <input type="text" name="displayName" value="<%= account.DisplayName || '' %>" />
+    <label>Email</label>
+    <input type="email" name="email" value="<%= account.Email %>" required />
+    <div><button type="submit" style="margin-top:16px;">Save profile</button></div>
+  </form>
+  <p class="muted">Last login <%= account.LastLoginAt ? new Date(account.LastLoginAt).toLocaleString() : 'never' %> · Password last changed <%= account.PasswordChangedAt ? new Date(account.PasswordChangedAt).toLocaleString() : 'never' %></p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Change password</h2>
+  <form method="post" action="/admin-ui/account/change-password">
+    <label>Current password</label>
+    <input type="password" name="currentPassword" required />
+    <label>New password</label>
+    <input type="password" name="newPassword" required minlength="8" />
+    <div><button type="submit" style="margin-top:16px;">Change password</button></div>
+  </form>
+  <p class="muted">This ends any other active sessions for your account — you'll stay signed in here.</p>
+</div>
+
+<%- include('partials/footer') %>
