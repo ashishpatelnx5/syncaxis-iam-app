@@ -1,3 +1,19 @@
 </main>
+<script nonce="<%= cspNonce %>">
+  // Shared feedback for auto-saving checkboxes (permission/role/group toggles
+  // across role-permissions.ejs, group-detail.ejs, user-detail.ejs) - those
+  // toggles persist on `change` with no page reload, so without this the only
+  // sign anything happened was a failure alert(); a successful save looked
+  // identical to a no-op click.
+  window.flashToggleResult = function (el, ok) {
+    var host = el.closest('label') || el.parentElement;
+    if (!host) return;
+    var indicator = document.createElement('span');
+    indicator.textContent = ok ? ' Saved' : ' Failed to save';
+    indicator.style.cssText = 'font-size:11px;margin-left:6px;font-weight:600;' + (ok ? 'color:#1b7a37;' : 'color:#b02a2a;');
+    host.appendChild(indicator);
+    setTimeout(function () { indicator.remove(); }, 1400);
+  };
+</script>
 </body>
 </html>

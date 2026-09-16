@@ -1,6 +1,17 @@
 <%- include('partials/header', { title: 'Role: ' + role.Name, active: 'roles', authUser }) %>
 
-<p class="muted">Toggling a checkbox updates <code>RolePermissions</code> immediately for every user (directly or via a group) holding this role.</p>
+<div class="card">
+  <h2 style="margin-top:0;">Details</h2>
+  <form method="post" action="/admin-ui/roles/<%= role.RoleId %>">
+    <label>Name</label>
+    <input type="text" name="name" value="<%= role.Name %>" required />
+    <label>Description</label>
+    <input type="text" name="description" value="<%= role.Description || '' %>" />
+    <div><button type="submit" style="margin-top:16px;">Save</button></div>
+  </form>
+</div>
+
+<p class="muted">Toggling a checkbox below updates <code>RolePermissions</code> immediately for every user (directly or via a group) holding this role.</p>
 
 <% appsGrouped.forEach(function(app) { %>
   <div class="card">
@@ -32,14 +43,42 @@
 <% }) %>
 <% if (appsGrouped.length === 0) { %><p class="muted">No apps have registered any permission keys yet.</p><% } %>
 
-<script>
+<div class="card">
+  <h2 style="margin-top:0;">Delete role</h2>
+  <% if (role.IsFullAccess) { %>
+    <p class="muted">Full-access roles can't be deleted from here — this role bypasses permission checks entirely, so removing it could lock every admin out.</p>
+  <% } else { %>
+    <p class="muted">Users and groups holding this role lose every permission it grants. This cannot be undone.</p>
+    <form method="post" action="/admin-ui/roles/<%= role.RoleId %>/delete" id="deleteRoleForm">
+      <button type="submit" class="danger">Delete role</button>
+    </form>
+  <% } %>
+</div>
+
+<script nonce="<%= cspNonce %>">
+  var deleteRoleForm = document.getElementById('deleteRoleForm');
+  if (deleteRoleForm) {
+    deleteRoleForm.addEventListener('submit', function (e) {
+      if (!confirm('Delete this role? This cannot be undone.')) e.preventDefault();
+    });
+  }
   document.querySelectorAll('.perm-toggle').forEach(function (el) {
     el.addEventListener('change', function () {
+      var checked = el.checked;
       fetch('/admin-ui/roles/<%= role.RoleId %>/permissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ permissionId: Number(el.dataset.permissionId), action: el.checked ? 'add' : 'remove' }),
-      }).then(function (r) { if (!r.ok) { alert('Failed to update.'); location.reload(); } });
+        body: JSON.stringify({ permissionId: Number(el.dataset.permissionId), action: checked ? 'add' : 'remove' }),
+        keepalive: true, // this page also has a normal <form> Save button - without
+                          // keepalive, clicking it right after a toggle can navigate
+                          // away before this request is sent, silently dropping it
+      }).then(function (r) {
+        if (!r.ok) el.checked = !checked;
+        window.flashToggleResult(el, r.ok);
+      }).catch(function () {
+        el.checked = !checked;
+        window.flashToggleResult(el, false);
+      });
     });
   });
 </script>

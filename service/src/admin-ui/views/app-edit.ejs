@@ -22,4 +22,18 @@
   </form>
 </div>
 
+<div class="card">
+  <h2 style="margin-top:0;">Delete app</h2>
+  <p class="muted">Removes <%= app.Key %> and every permission key it has declared — any role granting one of those permissions loses it too. This cannot be undone.</p>
+  <form method="post" action="/admin-ui/apps/<%= app.Key %>/delete" id="deleteAppForm">
+    <button type="submit" class="danger">Delete app</button>
+  </form>
+</div>
+
+<script nonce="<%= cspNonce %>">
+  document.getElementById('deleteAppForm').addEventListener('submit', function (e) {
+    if (!confirm('Delete this app and all its declared permission keys? This cannot be undone.')) e.preventDefault();
+  });
+</script>
+
 <%- include('partials/footer') %>

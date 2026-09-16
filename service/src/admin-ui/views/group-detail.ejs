@@ -13,7 +13,7 @@
 
 <div class="card">
   <h2 style="margin-top:0;">Roles granted to this group</h2>
-  <p class="muted">Every member gets these roles on top of whatever they hold directly.</p>
+  <p class="muted">Every member gets these roles on top of whatever they hold directly. Each checkbox saves immediately — the Save button above only applies to Name/Description.</p>
   <% allRoles.forEach(function(r) { %>
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:18px;">
       <input type="checkbox" class="role-toggle" data-role-id="<%= r.RoleId %>" <%= roleIds.includes(r.RoleId) ? 'checked' : '' %> style="width:auto;" />
@@ -46,19 +46,35 @@
 <div class="card">
   <h2 style="margin-top:0;">Delete group</h2>
   <p class="muted">Members keep any roles they hold directly — they only lose what this group itself grants them.</p>
-  <form method="post" action="/admin-ui/groups/<%= group.GroupId %>/delete" onsubmit="return confirm('Delete this group? This cannot be undone.');">
+  <form method="post" action="/admin-ui/groups/<%= group.GroupId %>/delete" id="deleteGroupForm">
     <button type="submit" class="danger">Delete group</button>
   </form>
 </div>
 
-<script>
+<script nonce="<%= cspNonce %>">
+  var deleteGroupForm = document.getElementById('deleteGroupForm');
+  if (deleteGroupForm) {
+    deleteGroupForm.addEventListener('submit', function (e) {
+      if (!confirm('Delete this group? This cannot be undone.')) e.preventDefault();
+    });
+  }
   document.querySelectorAll('.role-toggle').forEach(function (el) {
     el.addEventListener('change', function () {
+      var checked = el.checked;
       fetch('/admin-ui/groups/<%= group.GroupId %>/roles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roleId: Number(el.dataset.roleId), action: el.checked ? 'add' : 'remove' }),
-      }).then(function (r) { if (!r.ok) { alert('Failed to update.'); location.reload(); } });
+        body: JSON.stringify({ roleId: Number(el.dataset.roleId), action: checked ? 'add' : 'remove' }),
+        keepalive: true, // this page also has a normal <form> Save button - without
+                          // keepalive, clicking it right after a toggle can navigate
+                          // away before this request is sent, silently dropping it
+      }).then(function (r) {
+        if (!r.ok) el.checked = !checked;
+        window.flashToggleResult(el, r.ok);
+      }).catch(function () {
+        el.checked = !checked;
+        window.flashToggleResult(el, false);
+      });
     });
   });
   document.querySelectorAll('.member-remove').forEach(function (el) {
@@ -68,6 +84,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: Number(el.dataset.userId), action: 'remove' }),
+        keepalive: true,
       }).then(function (r) { if (r.ok) location.reload(); else alert('Failed to remove.'); });
     });
   });

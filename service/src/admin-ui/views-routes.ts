@@ -473,7 +473,7 @@ router.get('/roles/:id', ...requireUiAdmin, async (req: Request, res: Response, 
     const roleId = Number(req.params.id);
     const pool = await getPool();
 
-    const role = await pool.request().input('id', sql.Int, roleId).query('SELECT RoleId, Name FROM Roles WHERE RoleId = @id');
+    const role = await pool.request().input('id', sql.Int, roleId).query('SELECT RoleId, Name, Description, IsFullAccess FROM Roles WHERE RoleId = @id');
     if (!role.recordset[0]) {
       res.status(404).send('Role not found.');
       return;
@@ -507,6 +507,51 @@ router.get('/roles/:id', ...requireUiAdmin, async (req: Request, res: Response, 
     }));
 
     res.render('role-permissions', { authUser: req.authUser, role: role.recordset[0], appsGrouped });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/roles/:id', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const roleId = Number(req.params.id);
+    const { name, description } = req.body || {};
+    if (!name || String(name).trim().length < 2) {
+      res.status(400).send('Role name must be at least 2 characters.');
+      return;
+    }
+    const pool = await getPool();
+    await pool
+      .request()
+      .input('id', sql.Int, roleId)
+      .input('name', sql.NVarChar(100), name)
+      .input('description', sql.NVarChar(400), description || null)
+      .query('UPDATE Roles SET Name = @name, Description = @description WHERE RoleId = @id');
+    res.redirect(`/admin-ui/roles/${roleId}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A full-access role bypasses RolePermissions entirely (schema comment on
+// Roles.IsFullAccess) - deleting the wrong one here could strip every admin
+// of console access with no way back in through this same console, so it's
+// blocked outright rather than just confirmed.
+router.post('/roles/:id/delete', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const roleId = Number(req.params.id);
+    const pool = await getPool();
+    const role = await pool.request().input('id', sql.Int, roleId).query('SELECT IsFullAccess FROM Roles WHERE RoleId = @id');
+    if (!role.recordset[0]) {
+      res.status(404).send('Role not found.');
+      return;
+    }
+    if (role.recordset[0].IsFullAccess) {
+      res.status(400).send('Full-access roles cannot be deleted.');
+      return;
+    }
+    await pool.request().input('id', sql.Int, roleId).query('DELETE FROM Roles WHERE RoleId = @id');
+    res.redirect('/admin-ui/roles');
   } catch (err) {
     next(err);
   }
@@ -746,6 +791,24 @@ router.post('/apps/:key/edit', ...requireUiAdmin, async (req: Request, res: Resp
       .input('isActive', sql.Bit, isActive === 'true')
       .query('UPDATE Apps SET Name = @name, BaseUrl = @baseUrl, IsActive = @isActive WHERE [Key] = @key');
 
+    res.redirect('/admin-ui/apps');
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Cascades to this app's Permissions and, from there, to RolePermissions
+// (schema FK_Permissions_App / FK_RolePermissions_Permission) - any role
+// holding one of this app's permissions silently loses it, so the template
+// confirms with the permission count before submitting.
+router.post('/apps/:key/delete', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().input('key', sql.NVarChar(50), req.params.key).query('DELETE FROM Apps WHERE [Key] = @key');
+    if (result.rowsAffected[0] === 0) {
+      res.status(404).send('App not found.');
+      return;
+    }
     res.redirect('/admin-ui/apps');
   } catch (err) {
     next(err);

@@ -54,18 +54,34 @@
 <div class="card">
   <h2 style="margin-top:0;">Sessions</h2>
   <p class="muted">Force this user's access to end everywhere within one re-verify cycle in every app, without waiting for their token to expire.</p>
-  <form method="post" action="/admin-ui/users/<%= user.UserId %>/force-logout" onsubmit="return confirm('Force logout everywhere for this user?');">
+  <form method="post" action="/admin-ui/users/<%= user.UserId %>/force-logout" id="forceLogoutForm">
     <button type="submit" class="danger">Force logout everywhere</button>
   </form>
 </div>
 
-<script>
+<script nonce="<%= cspNonce %>">
+  var forceLogoutForm = document.getElementById('forceLogoutForm');
+  if (forceLogoutForm) {
+    forceLogoutForm.addEventListener('submit', function (e) {
+      if (!confirm('Force logout everywhere for this user?')) e.preventDefault();
+    });
+  }
   function toggle(el, url, idField) {
+    var checked = el.checked;
     fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [idField]: Number(el.dataset[idField === 'roleId' ? 'roleId' : 'groupId']), action: el.checked ? 'add' : 'remove' }),
-    }).then(function (r) { if (!r.ok) { alert('Failed to update.'); location.reload(); } });
+      body: JSON.stringify({ [idField]: Number(el.dataset[idField === 'roleId' ? 'roleId' : 'groupId']), action: checked ? 'add' : 'remove' }),
+      keepalive: true, // this page also has normal <form> Save buttons - without
+                        // keepalive, clicking one right after a toggle can navigate
+                        // away before this request is sent, silently dropping it
+    }).then(function (r) {
+      if (!r.ok) el.checked = !checked;
+      window.flashToggleResult(el, r.ok);
+    }).catch(function () {
+      el.checked = !checked;
+      window.flashToggleResult(el, false);
+    });
   }
   document.querySelectorAll('.role-toggle').forEach(function (el) {
     el.addEventListener('change', function () { toggle(el, '/admin-ui/users/<%= user.UserId %>/roles', 'roleId'); });

@@ -1,7 +1,8 @@
 import cookieParser from 'cookie-parser';
+import crypto from 'crypto';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import helmet from 'helmet';
+import helmet, { contentSecurityPolicy } from 'helmet';
 import path from 'path';
 import authRoutes from './routes/auth';
 import healthRoutes from './routes/health';
@@ -18,7 +19,28 @@ export function createApp() {
   // No CORS middleware anywhere: /auth/* and /admin/* are server-to-server
   // only (architecture doc §8.1), and the admin console is server-rendered
   // by this same process, so nothing ever calls this API cross-origin.
-  app.use(helmet());
+
+  // Per-request nonce for the admin console's inline <script> blocks - must
+  // be set before helmet() runs so its CSP header can reference it, and
+  // before any res.render() call since EJS reads it off res.locals.
+  app.use((_req, res, next) => {
+    res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
+    next();
+  });
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          ...contentSecurityPolicy.getDefaultDirectives(),
+          // admin-ui's checkbox auto-save/delete-confirm scripts are inline
+          // (server-rendered alongside their data, e.g. role/group ids) -
+          // nonce them individually rather than allowing 'unsafe-inline'.
+          'script-src': ["'self'", (_req, res) => `'nonce-${(res as express.Response).locals.cspNonce}'`],
+        },
+      },
+    }),
+  );
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false })); // admin-ui <form> posts
   app.use(cookieParser());
