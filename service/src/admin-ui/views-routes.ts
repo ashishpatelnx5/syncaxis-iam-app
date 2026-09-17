@@ -24,6 +24,20 @@ function splitMobileNumber(mobile: string | null | undefined): { countryCode: st
   return match ? { countryCode: match.code, number: mobile.slice(match.code.length) } : { countryCode: DEFAULT_COUNTRY_CODE, number: mobile };
 }
 
+// Renders what actually changed between two snapshots of the same row for
+// an audit Detail string - e.g. "email: 'a@x.com' -> 'b@x.com'" - rather
+// than just "updated", so the log answers *what* an admin did, not just
+// that they did something.
+function diffFields(before: Record<string, unknown>, after: Record<string, unknown>, labels: Record<string, string>): string {
+  const parts: string[] = [];
+  for (const key of Object.keys(labels)) {
+    const b = before[key] ?? '';
+    const a = after[key] ?? '';
+    if (String(b) !== String(a)) parts.push(`${labels[key]}: '${b || '(empty)'}' -> '${a || '(empty)'}'`);
+  }
+  return parts.length ? parts.join('; ') : '(no changes)';
+}
+
 const router = Router();
 const ADMIN_SESSION_COOKIE = 'iam_admin_session';
 const ADMIN_PERMISSION = 'iam.admin.manage';
@@ -199,8 +213,10 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
 
 router.post('/logout', (req: Request, res: Response) => {
   const sessionId = req.cookies?.[ADMIN_SESSION_COOKIE];
+  const session = sessionId ? adminSessions.get(sessionId) : undefined;
   if (sessionId) adminSessions.delete(sessionId);
   res.clearCookie(ADMIN_SESSION_COOKIE);
+  if (session) void writeAuditLog({ userId: session.userId, eventType: 'LOGOUT', ipAddress: clientIp(req) });
   res.redirect('/admin-ui/login');
 });
 
@@ -242,12 +258,20 @@ router.post('/account', ...requireUiAccount, async (req: Request, res: Response,
     }
 
     const pool = await getPool();
+    const before = await pool.request().input('id', sql.Int, req.authUser!.id).query('SELECT DisplayName, Email FROM Users WHERE UserId = @id');
     await pool
       .request()
       .input('id', sql.Int, req.authUser!.id)
       .input('displayName', sql.NVarChar(200), displayName || null)
       .input('email', sql.NVarChar(255), email)
       .query('UPDATE Users SET DisplayName = @displayName, Email = @email WHERE UserId = @id');
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'ACCOUNT_UPDATED',
+      detail: diffFields(before.recordset[0], { DisplayName: displayName || null, Email: email }, { DisplayName: 'display name', Email: 'email' }),
+      ipAddress: clientIp(req),
+    });
 
     const result = await pool.request().input('id', sql.Int, req.authUser!.id).query('SELECT UserId, Username, Email, DisplayName, LastLoginAt, PasswordChangedAt FROM Users WHERE UserId = @id');
     res.render('account', {
@@ -444,8 +468,16 @@ router.post('/users/new', ...requireUiAdmin, async (req: Request, res: Response,
         // below (architecture doc §10).
         'INSERT INTO Users (Username, Email, FirstName, MiddleName, LastName, DisplayName, MobileNumber, PasswordHash, MustChangePassword) VALUES (@username, @email, @firstName, @middleName, @lastName, @displayName, @mobileNumber, @passwordHash, 1); SELECT CAST(SCOPE_IDENTITY() AS INT) AS UserId;',
       );
+    const newUserId = result.recordset[0].UserId;
 
-    res.redirect(`/admin-ui/users/${result.recordset[0].UserId}`);
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'USER_CREATED',
+      detail: `created user '${username}' (id ${newUserId}, email ${resolvedEmail})`,
+      ipAddress: clientIp(req),
+    });
+
+    res.redirect(`/admin-ui/users/${newUserId}`);
   } catch (err) {
     next(err);
   }
@@ -499,6 +531,10 @@ router.post('/users/:id', ...requireUiAdmin, async (req: Request, res: Response,
     }
     const resolvedMobile = `${countryCode || DEFAULT_COUNTRY_CODE}${mobileDigits}`;
     const pool = await getPool();
+    const before = await pool
+      .request()
+      .input('id', sql.Int, userId)
+      .query('SELECT Username, FirstName, MiddleName, LastName, DisplayName, Email, MobileNumber, IsActive, IsLocked, MustChangePassword FROM Users WHERE UserId = @id');
     await pool
       .request()
       .input('id', sql.Int, userId)
@@ -514,6 +550,19 @@ router.post('/users/:id', ...requireUiAdmin, async (req: Request, res: Response,
       .query(
         'UPDATE Users SET FirstName = @firstName, MiddleName = @middleName, LastName = @lastName, DisplayName = @displayName, Email = @email, MobileNumber = @mobileNumber, IsActive = @isActive, IsLocked = @isLocked, MustChangePassword = @mustChangePassword, FailedLoginCount = CASE WHEN @isLocked = 0 THEN 0 ELSE FailedLoginCount END WHERE UserId = @id',
       );
+
+    const diff = diffFields(
+      before.recordset[0],
+      { FirstName: firstName || null, MiddleName: middleName || null, LastName: lastName || null, DisplayName: displayName || null, Email: email, MobileNumber: resolvedMobile, IsActive: isActive === 'true', IsLocked: isLocked === 'true', MustChangePassword: mustChangePassword === 'true' },
+      { FirstName: 'first name', MiddleName: 'middle name', LastName: 'last name', DisplayName: 'display name', Email: 'email', MobileNumber: 'mobile', IsActive: 'active', IsLocked: 'locked', MustChangePassword: 'must change password' },
+    );
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'USER_UPDATED',
+      detail: `target user '${before.recordset[0]?.Username}' (id ${userId}): ${diff}`,
+      ipAddress: clientIp(req),
+    });
+
     res.redirect(`/admin-ui/users/${userId}`);
   } catch (err) {
     next(err);
@@ -534,14 +583,22 @@ router.post('/users/:id/reset-password', ...requireUiAdmin, async (req: Request,
     }
     const passwordHash = await bcrypt.hash(password, 12);
     const pool = await getPool();
-    await pool
+    const result = await pool
       .request()
       .input('id', sql.Int, userId)
       .input('passwordHash', sql.NVarChar(255), passwordHash)
       // An admin-set password is always treated as temporary - the user
       // must change it themselves on their next login, same as a brand-new
       // account (architecture doc §10).
-      .query('UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME(), MustChangePassword = 1 WHERE UserId = @id');
+      .query('UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME(), MustChangePassword = 1 OUTPUT INSERTED.Username WHERE UserId = @id');
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'PASSWORD_RESET',
+      detail: `target user '${result.recordset[0]?.Username}' (id ${userId})`,
+      ipAddress: clientIp(req),
+    });
+
     res.redirect(`/admin-ui/users/${userId}`);
   } catch (err) {
     next(err);
@@ -562,6 +619,18 @@ router.post('/users/:id/roles', ...requireUiAdmin, async (req: Request, res: Res
     } else {
       await pool.request().input('userId', sql.Int, userId).input('roleId', sql.Int, roleId).query('DELETE FROM UserRoles WHERE UserId = @userId AND RoleId = @roleId');
     }
+
+    const [userRow, roleRow] = await Promise.all([
+      pool.request().input('id', sql.Int, userId).query('SELECT Username FROM Users WHERE UserId = @id'),
+      pool.request().input('id', sql.Int, roleId).query('SELECT Name FROM Roles WHERE RoleId = @id'),
+    ]);
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'ROLE_CHANGED',
+      detail: `${action === 'add' ? 'granted' : 'revoked'} role '${roleRow.recordset[0]?.Name ?? roleId}' ${action === 'add' ? 'to' : 'from'} user '${userRow.recordset[0]?.Username ?? userId}'`,
+      ipAddress: clientIp(req),
+    });
+
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -582,6 +651,18 @@ router.post('/users/:id/groups', ...requireUiAdmin, async (req: Request, res: Re
     } else {
       await pool.request().input('userId', sql.Int, userId).input('groupId', sql.Int, groupId).query('DELETE FROM UserGroupMembers WHERE UserId = @userId AND GroupId = @groupId');
     }
+
+    const [userRow, groupRow] = await Promise.all([
+      pool.request().input('id', sql.Int, userId).query('SELECT Username FROM Users WHERE UserId = @id'),
+      pool.request().input('id', sql.Int, groupId).query('SELECT Name FROM UserGroups WHERE GroupId = @id'),
+    ]);
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'GROUP_CHANGED',
+      detail: `${action === 'add' ? 'added' : 'removed'} user '${userRow.recordset[0]?.Username ?? userId}' ${action === 'add' ? 'to' : 'from'} group '${groupRow.recordset[0]?.Name ?? groupId}'`,
+      ipAddress: clientIp(req),
+    });
+
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -592,7 +673,15 @@ router.post('/users/:id/force-logout', ...requireUiAdmin, async (req: Request, r
   try {
     const userId = Number(req.params.id);
     const pool = await getPool();
-    await pool.request().input('id', sql.Int, userId).query('UPDATE Users SET TokenValidAfter = SYSUTCDATETIME() WHERE UserId = @id');
+    const result = await pool.request().input('id', sql.Int, userId).query('UPDATE Users SET TokenValidAfter = SYSUTCDATETIME() OUTPUT INSERTED.Username WHERE UserId = @id');
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'FORCE_LOGOUT',
+      detail: `target user '${result.recordset[0]?.Username}' (id ${userId})`,
+      ipAddress: clientIp(req),
+    });
+
     res.redirect(`/admin-ui/users/${userId}`);
   } catch (err) {
     next(err);
@@ -614,11 +703,19 @@ router.post('/users/:id/delete', ...requireUiAdmin, async (req: Request, res: Re
       return;
     }
     const pool = await getPool();
-    const result = await pool.request().input('id', sql.Int, userId).query('DELETE FROM Users WHERE UserId = @id');
+    const result = await pool.request().input('id', sql.Int, userId).query('DELETE FROM Users OUTPUT DELETED.Username WHERE UserId = @id');
     if (result.rowsAffected[0] === 0) {
       res.status(404).send('User not found.');
       return;
     }
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'USER_DELETED',
+      detail: `deleted user '${result.recordset[0].Username}' (id ${userId})`,
+      ipAddress: clientIp(req),
+    });
+
     res.redirect('/admin-ui/users');
   } catch (err) {
     next(err);
@@ -655,6 +752,9 @@ router.post('/roles', ...requireUiAdmin, async (req: Request, res: Response, nex
       .input('name', sql.NVarChar(100), name)
       .input('description', sql.NVarChar(400), description || null)
       .query('INSERT INTO Roles (Name, Description) VALUES (@name, @description)');
+
+    await writeAuditLog({ userId: req.authUser!.id, eventType: 'ROLE_CREATED', detail: `created role '${name}'`, ipAddress: clientIp(req) });
+
     res.redirect('/admin-ui/roles');
   } catch (err) {
     next(err);
@@ -723,12 +823,21 @@ router.post('/roles/:id', ...requireUiAdmin, async (req: Request, res: Response,
       return;
     }
     const pool = await getPool();
+    const before = await pool.request().input('id', sql.Int, roleId).query('SELECT Name, Description FROM Roles WHERE RoleId = @id');
     await pool
       .request()
       .input('id', sql.Int, roleId)
       .input('name', sql.NVarChar(100), name)
       .input('description', sql.NVarChar(400), description || null)
       .query('UPDATE Roles SET Name = @name, Description = @description WHERE RoleId = @id');
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'ROLE_UPDATED',
+      detail: `target role id ${roleId}: ${diffFields(before.recordset[0], { Name: name, Description: description || null }, { Name: 'name', Description: 'description' })}`,
+      ipAddress: clientIp(req),
+    });
+
     res.redirect(`/admin-ui/roles/${roleId}`);
   } catch (err) {
     next(err);
@@ -743,7 +852,7 @@ router.post('/roles/:id/delete', ...requireUiAdmin, async (req: Request, res: Re
   try {
     const roleId = Number(req.params.id);
     const pool = await getPool();
-    const role = await pool.request().input('id', sql.Int, roleId).query('SELECT IsFullAccess FROM Roles WHERE RoleId = @id');
+    const role = await pool.request().input('id', sql.Int, roleId).query('SELECT Name, IsFullAccess FROM Roles WHERE RoleId = @id');
     if (!role.recordset[0]) {
       res.status(404).send('Role not found.');
       return;
@@ -753,6 +862,14 @@ router.post('/roles/:id/delete', ...requireUiAdmin, async (req: Request, res: Re
       return;
     }
     await pool.request().input('id', sql.Int, roleId).query('DELETE FROM Roles WHERE RoleId = @id');
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'ROLE_DELETED',
+      detail: `deleted role '${role.recordset[0].Name}' (id ${roleId})`,
+      ipAddress: clientIp(req),
+    });
+
     res.redirect('/admin-ui/roles');
   } catch (err) {
     next(err);
@@ -773,6 +890,19 @@ router.post('/roles/:id/permissions', ...requireUiAdmin, async (req: Request, re
     } else {
       await pool.request().input('roleId', sql.Int, roleId).input('permissionId', sql.Int, permissionId).query('DELETE FROM RolePermissions WHERE RoleId = @roleId AND PermissionId = @permissionId');
     }
+
+    const [roleRow, permRow] = await Promise.all([
+      pool.request().input('id', sql.Int, roleId).query('SELECT Name FROM Roles WHERE RoleId = @id'),
+      pool.request().input('id', sql.Int, permissionId).query('SELECT p.[Key] AS PermKey, a.[Key] AS AppKey FROM Permissions p JOIN Apps a ON a.AppId = p.AppId WHERE p.PermissionId = @id'),
+    ]);
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'PERMISSIONS_UPDATED',
+      appKey: permRow.recordset[0]?.AppKey ?? null,
+      detail: `${action === 'add' ? 'granted' : 'revoked'} permission '${permRow.recordset[0]?.PermKey ?? permissionId}' ${action === 'add' ? 'to' : 'from'} role '${roleRow.recordset[0]?.Name ?? roleId}'`,
+      ipAddress: clientIp(req),
+    });
+
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -809,6 +939,9 @@ router.post('/groups', ...requireUiAdmin, async (req: Request, res: Response, ne
       .input('name', sql.NVarChar(150), name)
       .input('description', sql.NVarChar(400), description || null)
       .query('INSERT INTO UserGroups (Name, Description) VALUES (@name, @description)');
+
+    await writeAuditLog({ userId: req.authUser!.id, eventType: 'GROUP_CREATED', detail: `created group '${name}'`, ipAddress: clientIp(req) });
+
     res.redirect('/admin-ui/groups');
   } catch (err) {
     next(err);
@@ -853,12 +986,21 @@ router.post('/groups/:id', ...requireUiAdmin, async (req: Request, res: Response
       return;
     }
     const pool = await getPool();
+    const before = await pool.request().input('id', sql.Int, groupId).query('SELECT Name, Description FROM UserGroups WHERE GroupId = @id');
     await pool
       .request()
       .input('id', sql.Int, groupId)
       .input('name', sql.NVarChar(150), name)
       .input('description', sql.NVarChar(400), description || null)
       .query('UPDATE UserGroups SET Name = @name, Description = @description WHERE GroupId = @id');
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'GROUP_UPDATED',
+      detail: `target group id ${groupId}: ${diffFields(before.recordset[0], { Name: name, Description: description || null }, { Name: 'name', Description: 'description' })}`,
+      ipAddress: clientIp(req),
+    });
+
     res.redirect(`/admin-ui/groups/${groupId}`);
   } catch (err) {
     next(err);
@@ -869,7 +1011,15 @@ router.post('/groups/:id/delete', ...requireUiAdmin, async (req: Request, res: R
   try {
     const groupId = Number(req.params.id);
     const pool = await getPool();
-    await pool.request().input('id', sql.Int, groupId).query('DELETE FROM UserGroups WHERE GroupId = @id');
+    const result = await pool.request().input('id', sql.Int, groupId).query('DELETE FROM UserGroups OUTPUT DELETED.Name WHERE GroupId = @id');
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'GROUP_DELETED',
+      detail: `deleted group '${result.recordset[0]?.Name}' (id ${groupId})`,
+      ipAddress: clientIp(req),
+    });
+
     res.redirect('/admin-ui/groups');
   } catch (err) {
     next(err);
@@ -890,6 +1040,18 @@ router.post('/groups/:id/roles', ...requireUiAdmin, async (req: Request, res: Re
     } else {
       await pool.request().input('groupId', sql.Int, groupId).input('roleId', sql.Int, roleId).query('DELETE FROM GroupRoles WHERE GroupId = @groupId AND RoleId = @roleId');
     }
+
+    const [groupRow, roleRow] = await Promise.all([
+      pool.request().input('id', sql.Int, groupId).query('SELECT Name FROM UserGroups WHERE GroupId = @id'),
+      pool.request().input('id', sql.Int, roleId).query('SELECT Name FROM Roles WHERE RoleId = @id'),
+    ]);
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'GROUP_ROLE_CHANGED',
+      detail: `${action === 'add' ? 'granted' : 'revoked'} role '${roleRow.recordset[0]?.Name ?? roleId}' ${action === 'add' ? 'to' : 'from'} group '${groupRow.recordset[0]?.Name ?? groupId}'`,
+      ipAddress: clientIp(req),
+    });
+
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -910,6 +1072,18 @@ router.post('/groups/:id/members', ...requireUiAdmin, async (req: Request, res: 
     } else {
       await pool.request().input('userId', sql.Int, userId).input('groupId', sql.Int, groupId).query('DELETE FROM UserGroupMembers WHERE UserId = @userId AND GroupId = @groupId');
     }
+
+    const [userRow, groupRow] = await Promise.all([
+      pool.request().input('id', sql.Int, userId).query('SELECT Username FROM Users WHERE UserId = @id'),
+      pool.request().input('id', sql.Int, groupId).query('SELECT Name FROM UserGroups WHERE GroupId = @id'),
+    ]);
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'GROUP_CHANGED',
+      detail: `${action === 'add' ? 'added' : 'removed'} user '${userRow.recordset[0]?.Username ?? userId}' ${action === 'add' ? 'to' : 'from'} group '${groupRow.recordset[0]?.Name ?? groupId}'`,
+      ipAddress: clientIp(req),
+    });
+
     res.status(204).end();
   } catch (err) {
     next(err);
@@ -946,6 +1120,9 @@ router.post('/apps', ...requireUiAdmin, async (req: Request, res: Response, next
       .input('name', sql.NVarChar(150), name)
       .input('baseUrl', sql.NVarChar(300), baseUrl || null)
       .query('INSERT INTO Apps ([Key], Name, BaseUrl) VALUES (@key, @name, @baseUrl)');
+
+    await writeAuditLog({ userId: req.authUser!.id, eventType: 'APP_REGISTERED', appKey: key, detail: `registered app '${name}' (key: ${key})`, ipAddress: clientIp(req) });
+
     res.redirect('/admin-ui/apps');
   } catch (err) {
     next(err);
@@ -985,6 +1162,7 @@ router.post('/apps/:key/edit', ...requireUiAdmin, async (req: Request, res: Resp
     }
 
     const pool = await getPool();
+    const before = await pool.request().input('key', sql.NVarChar(50), req.params.key).query('SELECT Name, BaseUrl, IsActive FROM Apps WHERE [Key] = @key');
     await pool
       .request()
       .input('key', sql.NVarChar(50), req.params.key)
@@ -992,6 +1170,14 @@ router.post('/apps/:key/edit', ...requireUiAdmin, async (req: Request, res: Resp
       .input('baseUrl', sql.NVarChar(300), baseUrl || null)
       .input('isActive', sql.Bit, isActive === 'true')
       .query('UPDATE Apps SET Name = @name, BaseUrl = @baseUrl, IsActive = @isActive WHERE [Key] = @key');
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'APP_REGISTERED',
+      appKey: req.params.key,
+      detail: `updated app (key: ${req.params.key}): ${diffFields(before.recordset[0], { Name: name, BaseUrl: baseUrl || null, IsActive: isActive === 'true' }, { Name: 'name', BaseUrl: 'base URL', IsActive: 'active' })}`,
+      ipAddress: clientIp(req),
+    });
 
     res.redirect('/admin-ui/apps');
   } catch (err) {
@@ -1002,15 +1188,27 @@ router.post('/apps/:key/edit', ...requireUiAdmin, async (req: Request, res: Resp
 // Cascades to this app's Permissions and, from there, to RolePermissions
 // (schema FK_Permissions_App / FK_RolePermissions_Permission) - any role
 // holding one of this app's permissions silently loses it, so the template
-// confirms with the permission count before submitting.
+// confirms with the permission count before submitting. This is the exact
+// action that wiped Company Portal's app + permission catalog with zero
+// audit trail before this logging existed - log generously here.
 router.post('/apps/:key/delete', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const pool = await getPool();
-    const result = await pool.request().input('key', sql.NVarChar(50), req.params.key).query('DELETE FROM Apps WHERE [Key] = @key');
+    const permCount = await pool.request().input('key', sql.NVarChar(50), req.params.key).query('SELECT COUNT(*) AS n FROM Permissions p JOIN Apps a ON a.AppId = p.AppId WHERE a.[Key] = @key');
+    const result = await pool.request().input('key', sql.NVarChar(50), req.params.key).query('DELETE FROM Apps OUTPUT DELETED.Name WHERE [Key] = @key');
     if (result.rowsAffected[0] === 0) {
       res.status(404).send('App not found.');
       return;
     }
+
+    await writeAuditLog({
+      userId: req.authUser!.id,
+      eventType: 'APP_DELETED',
+      appKey: req.params.key,
+      detail: `deleted app '${result.recordset[0].Name}' (key: ${req.params.key}) and its ${permCount.recordset[0].n} permission key(s), cascading to any role that granted them`,
+      ipAddress: clientIp(req),
+    });
+
     res.redirect('/admin-ui/apps');
   } catch (err) {
     next(err);
