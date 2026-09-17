@@ -34,6 +34,9 @@ CREATE TABLE Users (
     Username        NVARCHAR(100)   NOT NULL,
     Email           NVARCHAR(255)   NOT NULL,
     PasswordHash    NVARCHAR(255)   NOT NULL,   -- bcrypt/argon2 hash, never plaintext
+    FirstName       NVARCHAR(100)   NULL,
+    MiddleName      NVARCHAR(100)   NULL,
+    LastName        NVARCHAR(100)   NULL,
     DisplayName     NVARCHAR(200)   NULL,
     IsActive        BIT             NOT NULL DEFAULT (1),
     IsLocked        BIT             NOT NULL DEFAULT (0),

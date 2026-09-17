@@ -20,6 +20,7 @@ export async function attemptLogin(
   username: string,
   password: string,
   ipAddress: string | null,
+  appKey?: string,
 ): Promise<LoginOutcome> {
   const result = await pool
     .request()
@@ -30,7 +31,7 @@ export async function attemptLogin(
   const invalid: LoginOutcome = { ok: false, status: 401, error: 'Incorrect username or password.' };
 
   if (!user || !user.IsActive) {
-    await writeAuditLog({ eventType: 'LOGIN_FAILURE', detail: `username: ${username}`, ipAddress });
+    await writeAuditLog({ eventType: 'LOGIN_FAILURE', detail: `username: ${username}`, ipAddress, appKey });
     return invalid;
   }
 
@@ -54,6 +55,7 @@ export async function attemptLogin(
       eventType: locksNow ? 'ACCOUNT_LOCKED' : 'LOGIN_FAILURE',
       detail: `username: ${username}, failed attempt count: ${failedCount}`,
       ipAddress,
+      appKey,
     });
 
     if (locksNow) {
@@ -67,6 +69,6 @@ export async function attemptLogin(
     .input('id', sql.Int, user.UserId)
     .query('UPDATE Users SET FailedLoginCount = 0, LastLoginAt = SYSUTCDATETIME() WHERE UserId = @id');
 
-  await writeAuditLog({ userId: user.UserId, eventType: 'LOGIN_SUCCESS', ipAddress });
+  await writeAuditLog({ userId: user.UserId, eventType: 'LOGIN_SUCCESS', ipAddress, appKey });
   return { ok: true, status: 200, userId: user.UserId, username: user.Username };
 }

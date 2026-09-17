@@ -1,17 +1,23 @@
 <%- include('partials/header', { title: 'Role: ' + role.Name, active: 'roles', authUser }) %>
 
 <div class="card">
-  <h2 style="margin-top:0;">Details</h2>
-  <form method="post" action="/admin-ui/roles/<%= role.RoleId %>">
-    <label>Name</label>
-    <input type="text" name="name" value="<%= role.Name %>" required />
+  <div style="display:flex; align-items:center; justify-content:space-between;">
+    <h2 style="margin-top:0;">Details</h2>
+    <div>
+      <button type="button" id="editBtn">Edit</button>
+      <button type="button" id="saveBtn" style="display:none;">Save</button>
+      <button type="button" id="cancelBtn" class="secondary" style="display:none;">Cancel</button>
+    </div>
+  </div>
+  <form method="post" action="/admin-ui/roles/<%= role.RoleId %>" id="detailsForm">
+    <label class="required">Name</label>
+    <input type="text" name="name" value="<%= role.Name %>" required disabled class="editable-field" />
     <label>Description</label>
-    <input type="text" name="description" value="<%= role.Description || '' %>" />
-    <div><button type="submit" style="margin-top:16px;">Save</button></div>
+    <input type="text" name="description" value="<%= role.Description || '' %>" disabled class="editable-field" />
   </form>
 </div>
 
-<p class="muted">Toggling a checkbox below updates <code>RolePermissions</code> immediately for every user (directly or via a group) holding this role.</p>
+<p class="muted">Click Edit above to change permissions.</p>
 
 <% appsGrouped.forEach(function(app) { %>
   <div class="card">
@@ -20,7 +26,14 @@
       <thead>
         <tr>
           <th>Module</th>
-          <% app.actions.forEach(function(action) { %><th><%= action %></th><% }) %>
+          <% app.actions.forEach(function(action) { %>
+            <th>
+              <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;cursor:pointer;">
+                <input type="checkbox" class="select-all-toggle editable-field" data-action="<%= action %>" style="width:auto;" title="Select all in this column" disabled />
+                <%= action %>
+              </label>
+            </th>
+          <% }) %>
         </tr>
       </thead>
       <tbody>
@@ -31,7 +44,7 @@
             <td>
               <% var cell = mod.cells[action]; %>
               <% if (cell) { %>
-                <input type="checkbox" class="perm-toggle" data-permission-id="<%= cell.permissionId %>" <%= cell.granted ? 'checked' : '' %> />
+                <input type="checkbox" class="perm-toggle editable-field" data-permission-id="<%= cell.permissionId %>" data-action="<%= action %>" data-originally-checked="<%= cell.granted ? 'true' : 'false' %>" <%= cell.granted ? 'checked' : '' %> disabled />
               <% } %>
             </td>
           <% }) %>
@@ -59,27 +72,89 @@
   var deleteRoleForm = document.getElementById('deleteRoleForm');
   if (deleteRoleForm) {
     deleteRoleForm.addEventListener('submit', function (e) {
-      if (!confirm('Delete this role? This cannot be undone.')) e.preventDefault();
-    });
-  }
-  document.querySelectorAll('.perm-toggle').forEach(function (el) {
-    el.addEventListener('change', function () {
-      var checked = el.checked;
-      fetch('/admin-ui/roles/<%= role.RoleId %>/permissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ permissionId: Number(el.dataset.permissionId), action: checked ? 'add' : 'remove' }),
-        keepalive: true, // this page also has a normal <form> Save button - without
-                          // keepalive, clicking it right after a toggle can navigate
-                          // away before this request is sent, silently dropping it
-      }).then(function (r) {
-        if (!r.ok) el.checked = !checked;
-        window.flashToggleResult(el, r.ok);
-      }).catch(function () {
-        el.checked = !checked;
-        window.flashToggleResult(el, false);
+      e.preventDefault();
+      window.confirmModal('Delete this role? This cannot be undone.').then(function (ok) {
+        if (ok) deleteRoleForm.submit();
       });
     });
+  }
+  // Keeps a column's header checkbox in sync with its rows: checked if every
+  // existing checkbox in that column is checked, unchecked if none are, and
+  // indeterminate (a visual dash) if it's a mix - so the header never claims
+  // a state the rows don't actually agree on.
+  function syncSelectAll(selectAllEl) {
+    var table = selectAllEl.closest('table');
+    var boxes = table.querySelectorAll('.perm-toggle[data-action="' + selectAllEl.dataset.action + '"]');
+    var total = boxes.length;
+    var checkedCount = 0;
+    boxes.forEach(function (b) { if (b.checked) checkedCount++; });
+    selectAllEl.checked = total > 0 && checkedCount === total;
+    selectAllEl.indeterminate = checkedCount > 0 && checkedCount < total;
+  }
+
+  // Checkboxes no longer save themselves on `change` - they're disabled
+  // until Edit is clicked, and Save (below) is what actually sends anything
+  // to the server, all the changed ones at once.
+  document.querySelectorAll('.perm-toggle').forEach(function (el) {
+    el.addEventListener('change', function () {
+      var table = el.closest('table');
+      var header = table.querySelector('.select-all-toggle[data-action="' + el.dataset.action + '"]');
+      if (header) syncSelectAll(header);
+    });
+  });
+
+  document.querySelectorAll('.select-all-toggle').forEach(function (selectAllEl) {
+    syncSelectAll(selectAllEl); // initial state on page load
+    selectAllEl.addEventListener('change', function () {
+      var checked = selectAllEl.checked;
+      selectAllEl.indeterminate = false;
+      var table = selectAllEl.closest('table');
+      var boxes = table.querySelectorAll('.perm-toggle[data-action="' + selectAllEl.dataset.action + '"]');
+      boxes.forEach(function (cb) { cb.checked = checked; });
+    });
+  });
+
+  // Edit/Save/Cancel for the whole page (Name/Description + every permission
+  // checkbox) as one unit.
+  var editBtn = document.getElementById('editBtn');
+  var saveBtn = document.getElementById('saveBtn');
+  var cancelBtn = document.getElementById('cancelBtn');
+  var detailsForm = document.getElementById('detailsForm');
+  var editableFields = document.querySelectorAll('.editable-field');
+
+  editBtn.addEventListener('click', function () {
+    editableFields.forEach(function (el) { el.disabled = false; });
+    editBtn.style.display = 'none';
+    saveBtn.style.display = '';
+    cancelBtn.style.display = '';
+  });
+  cancelBtn.addEventListener('click', function () { location.reload(); });
+
+  saveBtn.addEventListener('click', function () {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+
+    var permDiffs = [];
+    document.querySelectorAll('.perm-toggle').forEach(function (el) {
+      var wasChecked = el.dataset.originallyChecked === 'true';
+      if (el.checked !== wasChecked) {
+        permDiffs.push(
+          fetch('/admin-ui/roles/<%= role.RoleId %>/permissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ permissionId: Number(el.dataset.permissionId), action: el.checked ? 'add' : 'remove' }),
+          }),
+        );
+      }
+    });
+
+    Promise.all(permDiffs)
+      .then(function () { detailsForm.submit(); }) // navigates to POST /roles/:id, saving Name/Description too
+      .catch(function () {
+        alert('Some changes failed to save. Please try again.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+      });
   });
 </script>
 

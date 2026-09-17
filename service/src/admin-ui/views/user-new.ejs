@@ -4,16 +4,44 @@
 
 <div class="card">
   <form method="post" action="/admin-ui/users/new">
-    <label>Username</label>
-    <input type="text" name="username" required />
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+      <div style="flex:1 1 160px;">
+        <label class="required">First name</label>
+        <input type="text" name="firstName" required style="max-width:none;" />
+      </div>
+      <div style="flex:1 1 160px;">
+        <label>Middle name</label>
+        <input type="text" name="middleName" style="max-width:none;" />
+      </div>
+      <div style="flex:1 1 160px;">
+        <label class="required">Last name</label>
+        <input type="text" name="lastName" required style="max-width:none;" />
+      </div>
+    </div>
+    <label class="required">Display name</label>
+    <input type="text" name="displayName" required />
     <label>Email</label>
-    <input type="email" name="email" required />
-    <label>Display name</label>
-    <input type="text" name="displayName" />
-    <label>Initial password</label>
-    <input type="password" name="password" required minlength="8" />
-    <button type="submit" style="margin-top:16px;">Create user</button>
+    <input type="email" name="email" />
+    <label class="required">Username</label>
+    <input type="text" name="username" required />
+    <label class="required">Initial password</label>
+    <div class="pwd-wrap"><input type="password" name="password" id="password" required minlength="8" /></div>
+    <label class="required">Confirm password</label>
+    <div class="pwd-wrap"><input type="password" name="confirmPassword" id="confirmPassword" required minlength="8" /></div>
+    <div><button type="submit" style="margin-top:16px;">Create user</button></div>
   </form>
 </div>
+
+<script nonce="<%= cspNonce %>">
+  (function () {
+    var pwd = document.getElementById('password');
+    var confirmPwd = document.getElementById('confirmPassword');
+    function checkMatch() {
+      confirmPwd.setCustomValidity(pwd.value !== confirmPwd.value ? 'Passwords do not match.' : '');
+    }
+    pwd.addEventListener('input', checkMatch);
+    confirmPwd.addEventListener('input', checkMatch);
+  })();
+</script>
 
 <%- include('partials/footer') %>

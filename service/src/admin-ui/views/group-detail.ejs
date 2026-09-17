@@ -1,22 +1,28 @@
 <%- include('partials/header', { title: 'Group: ' + group.Name, active: 'groups', authUser }) %>
 
 <div class="card">
-  <h2 style="margin-top:0;">Details</h2>
-  <form method="post" action="/admin-ui/groups/<%= group.GroupId %>">
-    <label>Name</label>
-    <input type="text" name="name" value="<%= group.Name %>" required />
+  <div style="display:flex; align-items:center; justify-content:space-between;">
+    <h2 style="margin-top:0;">Details</h2>
+    <div>
+      <button type="button" id="editBtn">Edit</button>
+      <button type="button" id="saveBtn" style="display:none;">Save</button>
+      <button type="button" id="cancelBtn" class="secondary" style="display:none;">Cancel</button>
+    </div>
+  </div>
+  <form method="post" action="/admin-ui/groups/<%= group.GroupId %>" id="detailsForm">
+    <label class="required">Name</label>
+    <input type="text" name="name" value="<%= group.Name %>" required disabled class="editable-field" />
     <label>Description</label>
-    <input type="text" name="description" value="<%= group.Description || '' %>" />
-    <div><button type="submit" style="margin-top:16px;">Save</button></div>
+    <input type="text" name="description" value="<%= group.Description || '' %>" disabled class="editable-field" />
   </form>
 </div>
 
 <div class="card">
   <h2 style="margin-top:0;">Roles granted to this group</h2>
-  <p class="muted">Every member gets these roles on top of whatever they hold directly. Each checkbox saves immediately — the Save button above only applies to Name/Description.</p>
+  <p class="muted">Every member gets these roles on top of whatever they hold directly. Click Edit above to change them.</p>
   <% allRoles.forEach(function(r) { %>
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:18px;">
-      <input type="checkbox" class="role-toggle" data-role-id="<%= r.RoleId %>" <%= roleIds.includes(r.RoleId) ? 'checked' : '' %> style="width:auto;" />
+      <input type="checkbox" class="role-toggle editable-field" data-role-id="<%= r.RoleId %>" data-originally-checked="<%= roleIds.includes(r.RoleId) ? 'true' : 'false' %>" <%= roleIds.includes(r.RoleId) ? 'checked' : '' %> style="width:auto;" disabled />
       <%= r.Name %>
     </label>
   <% }) %>
@@ -55,38 +61,68 @@
   var deleteGroupForm = document.getElementById('deleteGroupForm');
   if (deleteGroupForm) {
     deleteGroupForm.addEventListener('submit', function (e) {
-      if (!confirm('Delete this group? This cannot be undone.')) e.preventDefault();
+      e.preventDefault();
+      window.confirmModal('Delete this group? This cannot be undone.').then(function (ok) {
+        if (ok) deleteGroupForm.submit();
+      });
     });
   }
-  document.querySelectorAll('.role-toggle').forEach(function (el) {
-    el.addEventListener('change', function () {
-      var checked = el.checked;
-      fetch('/admin-ui/groups/<%= group.GroupId %>/roles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roleId: Number(el.dataset.roleId), action: checked ? 'add' : 'remove' }),
-        keepalive: true, // this page also has a normal <form> Save button - without
-                          // keepalive, clicking it right after a toggle can navigate
-                          // away before this request is sent, silently dropping it
-      }).then(function (r) {
-        if (!r.ok) el.checked = !checked;
-        window.flashToggleResult(el, r.ok);
-      }).catch(function () {
-        el.checked = !checked;
-        window.flashToggleResult(el, false);
+  document.querySelectorAll('.member-remove').forEach(function (el) {
+    el.addEventListener('click', function () {
+      window.confirmModal('Remove this member from the group?').then(function (ok) {
+        if (!ok) return;
+        fetch('/admin-ui/groups/<%= group.GroupId %>/members', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: Number(el.dataset.userId), action: 'remove' }),
+          keepalive: true,
+        }).then(function (r) { if (r.ok) location.reload(); else alert('Failed to remove.'); });
       });
     });
   });
-  document.querySelectorAll('.member-remove').forEach(function (el) {
-    el.addEventListener('click', function () {
-      if (!confirm('Remove this member from the group?')) return;
-      fetch('/admin-ui/groups/<%= group.GroupId %>/members', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: Number(el.dataset.userId), action: 'remove' }),
-        keepalive: true,
-      }).then(function (r) { if (r.ok) location.reload(); else alert('Failed to remove.'); });
+
+  // Edit/Save/Cancel for the whole page (Name/Description + role checkboxes)
+  // as one unit - Members removal and Delete above stay their own immediate,
+  // explicit actions since they're not "edits" in the same sense.
+  var editBtn = document.getElementById('editBtn');
+  var saveBtn = document.getElementById('saveBtn');
+  var cancelBtn = document.getElementById('cancelBtn');
+  var detailsForm = document.getElementById('detailsForm');
+  var editableFields = document.querySelectorAll('.editable-field');
+
+  editBtn.addEventListener('click', function () {
+    editableFields.forEach(function (el) { el.disabled = false; });
+    editBtn.style.display = 'none';
+    saveBtn.style.display = '';
+    cancelBtn.style.display = '';
+  });
+  cancelBtn.addEventListener('click', function () { location.reload(); });
+
+  saveBtn.addEventListener('click', function () {
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+
+    var roleDiffs = [];
+    document.querySelectorAll('.role-toggle').forEach(function (el) {
+      var wasChecked = el.dataset.originallyChecked === 'true';
+      if (el.checked !== wasChecked) {
+        roleDiffs.push(
+          fetch('/admin-ui/groups/<%= group.GroupId %>/roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roleId: Number(el.dataset.roleId), action: el.checked ? 'add' : 'remove' }),
+          }),
+        );
+      }
     });
+
+    Promise.all(roleDiffs)
+      .then(function () { detailsForm.submit(); }) // navigates to POST /groups/:id, saving Name/Description too
+      .catch(function () {
+        alert('Some changes failed to save. Please try again.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+      });
   });
 </script>
 

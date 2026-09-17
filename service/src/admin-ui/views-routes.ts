@@ -8,6 +8,7 @@ import { requireAuth, requirePermission } from '../middleware/auth';
 import { attemptLogin } from '../lib/authenticate';
 import { getEffectiveAccess } from '../lib/permissions';
 import { clientIp, writeAuditLog } from '../lib/audit';
+import { consumeSsoCode } from '../lib/ssoCodes';
 
 const MIN_PASSWORD_LENGTH = 8; // architecture doc §16.5
 
@@ -46,15 +47,76 @@ function requireUiAuth(req: Request, res: Response, next: NextFunction): void {
 
 const requireUiAdmin = [requireUiAuth, requireAuth, requirePermission(ADMIN_PERMISSION)];
 
+// Shared by the password form and the SSO handoff below - both end up
+// needing the same cookie + in-memory session record once a userId/username
+// pair has been established some other way.
+function startAdminSession(req: Request, res: Response, userId: number, username: string): void {
+  const sessionId = crypto.randomBytes(32).toString('hex');
+  adminSessions.set(sessionId, {
+    token: signToken(userId, username),
+    userId,
+    username,
+    expiresAt: Date.now() + env.sessionTtlHours * 60 * 60 * 1000,
+  });
+  res.cookie(ADMIN_SESSION_COOKIE, sessionId, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: req.protocol === 'https',
+    maxAge: env.sessionTtlHours * 60 * 60 * 1000,
+  });
+}
+
 // --- Login / logout -------------------------------------------------------
 
-router.get('/login', (req: Request, res: Response) => {
-  const sessionId = req.cookies?.[ADMIN_SESSION_COOKIE];
-  if (sessionId && adminSessions.has(sessionId)) {
+router.get('/login', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sessionId = req.cookies?.[ADMIN_SESSION_COOKIE];
+    if (sessionId && adminSessions.has(sessionId)) {
+      res.redirect('/admin-ui');
+      return;
+    }
+
+    // Tile-click handoff from another app (e.g. Company Portal) that already
+    // holds a signed-in user - same single-use code a satellite app's
+    // backend would exchange over HTTP, consumed in-process here instead
+    // since the admin console *is* this service.
+    const ssoCode = typeof req.query.ssoCode === 'string' ? req.query.ssoCode : null;
+    if (!ssoCode) {
+      res.render('login', { error: null });
+      return;
+    }
+
+    const userId = consumeSsoCode(ssoCode);
+    if (!userId) {
+      res.status(401).render('login', { error: 'This sign-in link has expired — please try again from the Portal.' });
+      return;
+    }
+
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input('id', sql.Int, userId)
+      .query('SELECT UserId, Username, IsActive FROM Users WHERE UserId = @id');
+    const user = result.recordset[0];
+    if (!user || !user.IsActive) {
+      res.status(401).render('login', { error: 'Account is no longer active.' });
+      return;
+    }
+
+    // Same admin-console-access gate as the password branch below (architecture
+    // doc §10) - holding a valid Portal/iam session isn't enough on its own.
+    const access = await getEffectiveAccess(pool, user.UserId);
+    if (!access.isFullAccess && !access.perms.has(ADMIN_PERMISSION)) {
+      res.status(403).render('login', { error: 'This account does not have admin console access.' });
+      return;
+    }
+
+    startAdminSession(req, res, user.UserId, user.Username);
+    await writeAuditLog({ userId: user.UserId, eventType: 'SSO_EXCHANGE', appKey: 'iam', ipAddress: clientIp(req) });
     res.redirect('/admin-ui');
-    return;
+  } catch (err) {
+    next(err);
   }
-  res.render('login', { error: null });
 });
 
 router.post('/login', async (req: Request, res: Response, next: NextFunction) => {
@@ -66,7 +128,7 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
     }
 
     const pool = await getPool();
-    const outcome = await attemptLogin(pool, username, password, clientIp(req));
+    const outcome = await attemptLogin(pool, username, password, clientIp(req), 'iam');
     if (!outcome.ok) {
       res.status(outcome.status).render('login', { error: outcome.error });
       return;
@@ -82,20 +144,7 @@ router.post('/login', async (req: Request, res: Response, next: NextFunction) =>
       return;
     }
 
-    const sessionId = crypto.randomBytes(32).toString('hex');
-    adminSessions.set(sessionId, {
-      token: signToken(outcome.userId!, outcome.username!),
-      userId: outcome.userId!,
-      username: outcome.username!,
-      expiresAt: Date.now() + env.sessionTtlHours * 60 * 60 * 1000,
-    });
-
-    res.cookie(ADMIN_SESSION_COOKIE, sessionId, {
-      httpOnly: true,
-      sameSite: 'strict',
-      secure: req.protocol === 'https',
-      maxAge: env.sessionTtlHours * 60 * 60 * 1000,
-    });
+    startAdminSession(req, res, outcome.userId!, outcome.username!);
     res.redirect('/admin-ui');
   } catch (err) {
     next(err);
@@ -241,13 +290,13 @@ router.get('/users', ...requireUiAdmin, async (req: Request, res: Response, next
     else if (status === 'locked') where += ' AND u.IsLocked = 1';
 
     const result = await request.query(`
-      SELECT u.UserId, u.Username, u.Email, u.DisplayName, u.IsActive, u.IsLocked, u.LastLoginAt,
+      SELECT u.UserId, u.Username, u.Email, u.DisplayName, u.FirstName, u.MiddleName, u.LastName, u.IsActive, u.IsLocked, u.LastLoginAt,
              STRING_AGG(r.Name, ', ') AS RoleNames
       FROM Users u
       LEFT JOIN UserRoles ur ON ur.UserId = u.UserId
       LEFT JOIN Roles r ON r.RoleId = ur.RoleId
       WHERE ${where}
-      GROUP BY u.UserId, u.Username, u.Email, u.DisplayName, u.IsActive, u.IsLocked, u.LastLoginAt
+      GROUP BY u.UserId, u.Username, u.Email, u.DisplayName, u.FirstName, u.MiddleName, u.LastName, u.IsActive, u.IsLocked, u.LastLoginAt
       ORDER BY u.Username
     `);
 
@@ -263,31 +312,57 @@ router.get('/users/new', ...requireUiAdmin, (req: Request, res: Response) => {
 
 router.post('/users/new', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { username, email, displayName, password } = req.body || {};
-    if (!username || String(username).trim().length < 3 || !email || !password || String(password).length < 8) {
-      res.status(400).render('user-new', { authUser: req.authUser, error: 'Username (3+ chars), email, and an 8+ character password are required.' });
+    const { username, email, firstName, middleName, lastName, displayName, password, confirmPassword } = req.body || {};
+    if (
+      !username ||
+      String(username).trim().length < 3 ||
+      !firstName ||
+      !lastName ||
+      !displayName ||
+      !password ||
+      String(password).length < 8
+    ) {
+      res
+        .status(400)
+        .render('user-new', { authUser: req.authUser, error: 'Username (3+ chars), first name, last name, display name, and an 8+ character password are required.' });
       return;
     }
+    if (password !== confirmPassword) {
+      res.status(400).render('user-new', { authUser: req.authUser, error: 'Password and confirm password do not match.' });
+      return;
+    }
+
+    // Same placeholder convention already used for accounts with no real
+    // address (see portal-integration-instructions.md) - Email is NOT NULL
+    // + UNIQUE at the DB level, so a blank form field still needs some value.
+    const resolvedEmail = email || `${username}@syncaxis.com`;
 
     const pool = await getPool();
     const existing = await pool
       .request()
       .input('username', sql.NVarChar(100), username)
-      .input('email', sql.NVarChar(255), email)
+      .input('email', sql.NVarChar(255), resolvedEmail)
       .query('SELECT UserId FROM Users WHERE Username = @username OR Email = @email');
     if (existing.recordset[0]) {
       res.status(409).render('user-new', { authUser: req.authUser, error: 'A user with that username or email already exists.' });
       return;
     }
 
+    // Falls back to first name before the username, so a name-only entry
+    // still gets a readable DisplayName instead of the raw username.
     const passwordHash = await bcrypt.hash(password, 12);
     const result = await pool
       .request()
       .input('username', sql.NVarChar(100), username)
-      .input('email', sql.NVarChar(255), email)
-      .input('displayName', sql.NVarChar(200), displayName || username)
+      .input('email', sql.NVarChar(255), resolvedEmail)
+      .input('firstName', sql.NVarChar(100), firstName || null)
+      .input('middleName', sql.NVarChar(100), middleName || null)
+      .input('lastName', sql.NVarChar(100), lastName || null)
+      .input('displayName', sql.NVarChar(200), displayName || firstName || username)
       .input('passwordHash', sql.NVarChar(255), passwordHash)
-      .query('INSERT INTO Users (Username, Email, DisplayName, PasswordHash) VALUES (@username, @email, @displayName, @passwordHash); SELECT CAST(SCOPE_IDENTITY() AS INT) AS UserId;');
+      .query(
+        'INSERT INTO Users (Username, Email, FirstName, MiddleName, LastName, DisplayName, PasswordHash) VALUES (@username, @email, @firstName, @middleName, @lastName, @displayName, @passwordHash); SELECT CAST(SCOPE_IDENTITY() AS INT) AS UserId;',
+      );
 
     res.redirect(`/admin-ui/users/${result.recordset[0].UserId}`);
   } catch (err) {
@@ -303,7 +378,7 @@ router.get('/users/:id', ...requireUiAdmin, async (req: Request, res: Response, 
     const userResult = await pool
       .request()
       .input('id', sql.Int, userId)
-      .query('SELECT UserId, Username, Email, DisplayName, IsActive, IsLocked, FailedLoginCount, LastLoginAt, CreatedAt FROM Users WHERE UserId = @id');
+      .query('SELECT UserId, Username, Email, FirstName, MiddleName, LastName, DisplayName, IsActive, IsLocked, FailedLoginCount, LastLoginAt, CreatedAt FROM Users WHERE UserId = @id');
     const user = userResult.recordset[0];
     if (!user) {
       res.status(404).send('User not found.');
@@ -333,17 +408,20 @@ router.get('/users/:id', ...requireUiAdmin, async (req: Request, res: Response, 
 router.post('/users/:id', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = Number(req.params.id);
-    const { displayName, email, isActive, isLocked } = req.body || {};
+    const { firstName, middleName, lastName, displayName, email, isActive, isLocked } = req.body || {};
     const pool = await getPool();
     await pool
       .request()
       .input('id', sql.Int, userId)
+      .input('firstName', sql.NVarChar(100), firstName || null)
+      .input('middleName', sql.NVarChar(100), middleName || null)
+      .input('lastName', sql.NVarChar(100), lastName || null)
       .input('displayName', sql.NVarChar(200), displayName || null)
       .input('email', sql.NVarChar(255), email)
       .input('isActive', sql.Bit, isActive === 'true')
       .input('isLocked', sql.Bit, isLocked === 'true')
       .query(
-        'UPDATE Users SET DisplayName = @displayName, Email = @email, IsActive = @isActive, IsLocked = @isLocked, FailedLoginCount = CASE WHEN @isLocked = 0 THEN 0 ELSE FailedLoginCount END WHERE UserId = @id',
+        'UPDATE Users SET FirstName = @firstName, MiddleName = @middleName, LastName = @lastName, DisplayName = @displayName, Email = @email, IsActive = @isActive, IsLocked = @isLocked, FailedLoginCount = CASE WHEN @isLocked = 0 THEN 0 ELSE FailedLoginCount END WHERE UserId = @id',
       );
     res.redirect(`/admin-ui/users/${userId}`);
   } catch (err) {
@@ -354,9 +432,13 @@ router.post('/users/:id', ...requireUiAdmin, async (req: Request, res: Response,
 router.post('/users/:id/reset-password', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = Number(req.params.id);
-    const { password } = req.body || {};
+    const { password, confirmPassword } = req.body || {};
     if (!password || String(password).length < 8) {
       res.status(400).send('Password must be at least 8 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      res.status(400).send('Password and confirm password do not match.');
       return;
     }
     const passwordHash = await bcrypt.hash(password, 12);
@@ -418,6 +500,32 @@ router.post('/users/:id/force-logout', ...requireUiAdmin, async (req: Request, r
     const pool = await getPool();
     await pool.request().input('id', sql.Int, userId).query('UPDATE Users SET TokenValidAfter = SYSUTCDATETIME() WHERE UserId = @id');
     res.redirect(`/admin-ui/users/${userId}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Hard delete (unlike the Active/Locked toggles above, which are the normal
+// way to disable an account) - cascades UserRoles/UserGroupMembers, and
+// AuditLog rows for this user keep their history with UserId set to NULL
+// (schema FK_AuditLog_User ON DELETE SET NULL). Blocked against the
+// currently signed-in admin deleting their own account, which would end
+// their own session mid-request with no way back into the console as
+// themselves.
+router.post('/users/:id/delete', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = Number(req.params.id);
+    if (userId === req.authUser!.id) {
+      res.status(400).send('You cannot delete your own account.');
+      return;
+    }
+    const pool = await getPool();
+    const result = await pool.request().input('id', sql.Int, userId).query('DELETE FROM Users WHERE UserId = @id');
+    if (result.rowsAffected[0] === 0) {
+      res.status(404).send('User not found.');
+      return;
+    }
+    res.redirect('/admin-ui/users');
   } catch (err) {
     next(err);
   }
@@ -821,30 +929,39 @@ const AUDIT_PAGE_SIZE = 50;
 
 router.get('/audit', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { page = '1', eventType, appKey } = req.query as Record<string, string>;
+    const { page = '1', search } = req.query as Record<string, string>;
     const pageNum = Math.max(1, Number(page) || 1);
     const pool = await getPool();
     const request = pool.request();
     let where = '1=1';
-    if (eventType) {
-      request.input('eventType', sql.NVarChar(50), eventType);
-      where += ' AND a.EventType = @eventType';
-    }
-    if (appKey) {
-      request.input('appKey', sql.NVarChar(50), appKey);
-      where += ' AND a.AppKey = @appKey';
+    const term = search ? search.trim() : '';
+    if (term) {
+      // One field, wildcard across everything a row could plausibly be
+      // searched by - event type, app (key or name), username, IP, detail -
+      // rather than separate exact-match dropdowns per column.
+      request.input('search', sql.NVarChar(200), `%${term}%`);
+      where += ` AND (
+        a.EventType LIKE @search
+        OR a.AppKey LIKE @search
+        OR ap.Name LIKE @search
+        OR u.Username LIKE @search
+        OR a.IpAddress LIKE @search
+        OR a.Detail LIKE @search
+      )`;
     }
     request.input('offset', sql.Int, (pageNum - 1) * AUDIT_PAGE_SIZE).input('pageSize', sql.Int, AUDIT_PAGE_SIZE);
 
     const result = await request.query(`
-      SELECT a.AuditId, a.EventType, a.AppKey, a.Detail, a.IpAddress, a.CreatedAt, u.Username
-      FROM AuditLog a LEFT JOIN Users u ON u.UserId = a.UserId
+      SELECT a.AuditId, a.EventType, a.AppKey, ap.Name AS AppName, a.Detail, a.IpAddress, a.CreatedAt, u.Username
+      FROM AuditLog a
+      LEFT JOIN Users u ON u.UserId = a.UserId
+      LEFT JOIN Apps ap ON ap.[Key] = a.AppKey
       WHERE ${where}
       ORDER BY a.CreatedAt DESC
       OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
     `);
 
-    res.render('audit', { authUser: req.authUser, entries: result.recordset, page: pageNum, pageSize: AUDIT_PAGE_SIZE, filters: { eventType, appKey } });
+    res.render('audit', { authUser: req.authUser, entries: result.recordset, page: pageNum, pageSize: AUDIT_PAGE_SIZE, filters: { search } });
   } catch (err) {
     next(err);
   }

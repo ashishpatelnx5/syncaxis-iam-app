@@ -1,9 +1,9 @@
 <%- include('partials/header', { title: 'Dashboard', active: 'dashboard', authUser }) %>
 
 <div class="stat-row">
-  <div class="stat"><div class="n"><%= counts.activeUsers %></div><div class="l">Active users</div></div>
-  <div class="stat"><div class="n"><%= counts.roles %></div><div class="l">Roles</div></div>
-  <div class="stat"><div class="n"><%= counts.apps %></div><div class="l">Registered apps</div></div>
+  <a class="stat" href="/admin-ui/users?status=active"><div class="n"><%= counts.activeUsers %></div><div class="l">Active users</div></a>
+  <a class="stat" href="/admin-ui/roles"><div class="n"><%= counts.roles %></div><div class="l">Roles</div></a>
+  <a class="stat" href="/admin-ui/apps"><div class="n"><%= counts.apps %></div><div class="l">Registered apps</div></a>
 </div>
 
 <h2>Recent audit events</h2>

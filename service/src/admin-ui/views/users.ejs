@@ -1,12 +1,12 @@
 <%- include('partials/header', { title: 'Users', active: 'users', authUser }) %>
 
 <div class="card">
-  <form method="get" action="/admin-ui/users">
-    <label style="display:inline-block;margin-right:12px;">
+  <form method="get" action="/admin-ui/users" style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+    <label style="margin:0; width:45%;">
       Search
-      <input type="text" name="search" value="<%= filters.search || '' %>" placeholder="username, email, name" />
+      <input type="text" name="search" class="search-wide" value="<%= filters.search || '' %>" placeholder="username, email, name" />
     </label>
-    <label style="display:inline-block;">
+    <label style="margin:0;">
       Status
       <select name="status">
         <option value="">All</option>
@@ -15,30 +15,34 @@
         <option value="inactive" <%= filters.status === 'inactive' ? 'selected' : '' %>>Inactive</option>
       </select>
     </label>
-    <button type="submit" style="margin-left:8px;">Filter</button>
+    <button type="submit">Search</button>
   </form>
 </div>
 
 <p><a class="button-link" href="/admin-ui/users/new">+ New user</a></p>
 
 <table>
-  <thead><tr><th>Username</th><th>Display name</th><th>Email</th><th>Roles</th><th>Status</th><th>Last login</th><th></th></tr></thead>
+  <thead><tr><th>Username</th><th>Display name</th><th>Roles</th><th>Status</th><th>Last login</th></tr></thead>
   <tbody>
   <% users.forEach(function(u) { %>
-    <tr>
+    <tr class="row-link" data-href="/admin-ui/users/<%= u.UserId %>" style="cursor:pointer;">
       <td><%= u.Username %></td>
       <td><%= u.DisplayName || '' %></td>
-      <td class="muted"><%= u.Email %></td>
       <td><% (u.RoleNames || '').split(', ').filter(Boolean).forEach(function(r) { %><span class="badge role"><%= r %></span><% }) %></td>
       <td>
         <% if (u.IsLocked) { %><span class="badge locked">Locked</span><% } else if (u.IsActive) { %><span class="badge active">Active</span><% } else { %><span class="badge inactive">Inactive</span><% } %>
       </td>
       <td class="muted"><%= u.LastLoginAt ? new Date(u.LastLoginAt).toLocaleString() : 'never' %></td>
-      <td><a href="/admin-ui/users/<%= u.UserId %>">Manage</a></td>
     </tr>
   <% }) %>
-  <% if (users.length === 0) { %><tr><td colspan="7" class="muted">No users match.</td></tr><% } %>
+  <% if (users.length === 0) { %><tr><td colspan="5" class="muted">No users match.</td></tr><% } %>
   </tbody>
 </table>
+
+<script nonce="<%= cspNonce %>">
+  document.querySelectorAll('tr.row-link').forEach(function (row) {
+    row.addEventListener('click', function () { location.href = row.dataset.href; });
+  });
+</script>
 
 <%- include('partials/footer') %>

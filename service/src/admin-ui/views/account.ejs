@@ -10,7 +10,7 @@
     <input type="text" value="<%= account.Username %>" disabled />
     <label>Display name</label>
     <input type="text" name="displayName" value="<%= account.DisplayName || '' %>" />
-    <label>Email</label>
+    <label class="required">Email</label>
     <input type="email" name="email" value="<%= account.Email %>" required />
     <div><button type="submit" style="margin-top:16px;">Save profile</button></div>
   </form>
@@ -20,10 +20,10 @@
 <div class="card">
   <h2 style="margin-top:0;">Change password</h2>
   <form method="post" action="/admin-ui/account/change-password">
-    <label>Current password</label>
-    <input type="password" name="currentPassword" required />
-    <label>New password</label>
-    <input type="password" name="newPassword" required minlength="8" />
+    <label class="required">Current password</label>
+    <div class="pwd-wrap"><input type="password" name="currentPassword" required /></div>
+    <label class="required">New password</label>
+    <div class="pwd-wrap"><input type="password" name="newPassword" required minlength="8" /></div>
     <div><button type="submit" style="margin-top:16px;">Change password</button></div>
   </form>
   <p class="muted">This ends any other active sessions for your account — you'll stay signed in here.</p>

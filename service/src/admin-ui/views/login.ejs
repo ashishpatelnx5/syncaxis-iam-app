@@ -2,30 +2,89 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Sign in · Syncaxis IAM Admin</title>
+<title>Syncaxis IAM Admin</title>
+<link rel="icon" href="/admin-ui/assets/favicon.png" />
 <style>
-  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; background: #2c3e50; height: 100vh; margin: 0; display: flex; align-items: center; justify-content: center; }
-  .card { background: #fff; border-radius: 8px; padding: 32px; width: 320px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  p.sub { color: #667; font-size: 13px; margin: 0 0 20px; }
-  label { display: block; font-size: 12.5px; font-weight: 600; margin: 12px 0 4px; color: #34495e; }
-  input { width: 100%; padding: 8px 10px; border: 1px solid #ccd2d8; border-radius: 4px; font-size: 14px; }
-  button { width: 100%; margin-top: 18px; background: #2c3e50; color: #fff; border: none; padding: 9px; border-radius: 4px; font-size: 14px; cursor: pointer; }
-  .error { background: #fde8e8; color: #a02020; padding: 8px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 4px; }
+  /* Deliberately independent of the app's light/dark theme (see
+     partials/header.ejs) - the login screen is always this same navy/white
+     look, same choice Company Portal's own Login.jsx makes. */
+  * { box-sizing: border-box; }
+  body {
+    color-scheme: light;
+    font-family: -apple-system, Segoe UI, Arial, sans-serif;
+    background: #0f2337;
+    height: 100vh;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .login-card {
+    width: 100%;
+    max-width: 340px;
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+    padding: 36px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    text-align: center;
+  }
+  .login-logo { width: 100%; max-width: 220px; height: auto; align-self: center; border-radius: 6px; }
+  .login-card h1 { font-size: 15px; font-weight: 600; color: #16324f; margin: 0; }
+  label { display: block; font-size: 12.5px; font-weight: 600; margin: 0 0 4px; color: #6b7280; text-align: left; }
+  input { width: 100%; padding: 8px 10px; border: 1px solid #e2e6ea; border-radius: 8px; font-size: 13.5px; color: #1f2937; background: #fff; }
+  input:focus { outline: 2px solid #3e6b94; outline-offset: -1px; }
+  /* Exact pattern from Company Portal's own .password-field/.password-toggle
+     (src/index.css) - the input keeps its normal width:100% + border, and
+     the toggle button is absolutely positioned spanning the input's full
+     height at the right edge, rather than being a flex sibling. */
+  .pwd-wrap { position: relative; display: flex; }
+  .pwd-wrap input { width: 100%; padding-right: 38px; }
+  .pwd-toggle { position: absolute; top: 0; right: 0; bottom: 0; width: 36px; padding: 0; margin: 0; display: flex; align-items: center; justify-content: center; background: none; border: none; cursor: pointer; color: #6b7280 !important; line-height: 1; }
+  .pwd-toggle:hover { color: #16324f !important; }
+  .pwd-toggle svg { display: block; width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor !important; }
+  button { width: 100%; margin-top: 4px; background: #16324f; border: 1px solid #16324f; color: #fff; padding: 9px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:hover { background: #3e6b94; border-color: #3e6b94; }
+  /* Always rendered, kept invisible when empty (rather than omitted from the
+     DOM) - reserves its own height either way, so the card is the same size
+     whether or not there's an error and nothing else shifts around it. */
+  .error { background: #fbeaea; color: #a6423a; border: 1px solid #a6423a; border-radius: 6px; padding: 8px 10px; font-size: 12.5px; line-height: 1.4; text-align: left; min-height: 42px; }
+  .error.is-empty { visibility: hidden; }
 </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Syncaxis IAM</h1>
-    <p class="sub">Admin console</p>
-    <% if (typeof error !== 'undefined' && error) { %><div class="error"><%= error %></div><% } %>
-    <form method="post" action="/admin-ui/login">
-      <label>Username</label>
-      <input type="text" name="username" required autofocus />
-      <label>Password</label>
-      <input type="password" name="password" required />
-      <button type="submit">Sign in</button>
-    </form>
-  </div>
+  <form class="login-card" method="post" action="/admin-ui/login">
+    <img class="login-logo" src="/admin-ui/assets/logo.png" alt="Syncaxis" />
+    <h1>IAM Admin Console</h1>
+    <div class="error <%= (typeof error !== 'undefined' && error) ? '' : 'is-empty' %>"><%= (typeof error !== 'undefined' && error) ? error : ' ' %></div>
+    <label>Username</label>
+    <input type="text" name="username" required autofocus />
+    <label>Password</label>
+    <div class="pwd-wrap"><input type="password" name="password" id="loginPassword" required /></div>
+    <button type="submit">Sign in</button>
+  </form>
+  <script nonce="<%= cspNonce %>">
+    var EYE_PATH = 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7ZM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z';
+    var EYE_OFF_PATH = 'M3 3l18 18M10.6 5.1A10.9 10.9 0 0 1 12 5c6.4 0 10 7 10 7a13.5 13.5 0 0 1-2.9 3.8M6.3 6.5C3.7 8.3 2 12 2 12s3.6 7 10 7c1.4 0 2.6-.3 3.7-.8M9.5 9.6a3 3 0 0 0 4.2 4.3';
+    function eyeSvg(open) {
+      return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="' + (open ? EYE_PATH : EYE_OFF_PATH) + '"/></svg>';
+    }
+    var pwdInput = document.getElementById('loginPassword');
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pwd-toggle';
+    btn.innerHTML = eyeSvg(true);
+    btn.setAttribute('aria-label', 'Show password');
+    btn.addEventListener('click', function () {
+      var showing = pwdInput.type === 'text';
+      pwdInput.type = showing ? 'password' : 'text';
+      btn.innerHTML = eyeSvg(showing);
+      btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    });
+    pwdInput.insertAdjacentElement('afterend', btn);
+  </script>
 </body>
 </html>

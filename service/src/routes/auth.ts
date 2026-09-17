@@ -1,5 +1,4 @@
 import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { getPool, sql } from '../config/db';
@@ -8,22 +7,10 @@ import { requireAuth } from '../middleware/auth';
 import { writeAuditLog, clientIp } from '../lib/audit';
 import { getEffectiveAccess, EffectiveAccess } from '../lib/permissions';
 import { attemptLogin } from '../lib/authenticate';
+import { consumeSsoCode, issueSsoCode } from '../lib/ssoCodes';
 
 const router = Router();
 const MIN_PASSWORD_LENGTH = 8; // architecture doc §16.5
-
-// Short-lived, single-use SSO handoff codes (architecture doc §4.2) - same
-// mechanism Company Portal already proved out for its own tile-click SSO.
-// In-memory only: an app restart just means anyone mid-handoff clicks the
-// tile again, which is an acceptable tradeoff at this scale (§9.4).
-const ssoCodes = new Map<string, { userId: number; expiresAt: number }>();
-
-function sweepExpiredSsoCodes(): void {
-  const now = Date.now();
-  for (const [code, entry] of ssoCodes) {
-    if (entry.expiresAt < now) ssoCodes.delete(code);
-  }
-}
 
 function signToken(userId: number, username: string): string {
   return jwt.sign({ sub: userId, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as jwt.SignOptions);
@@ -87,9 +74,7 @@ router.post('/login', async (req, res, next) => {
 // browser to another app's tile URL (architecture doc §4.2).
 router.post('/sso/issue', requireAuth, async (req, res, next) => {
   try {
-    sweepExpiredSsoCodes();
-    const code = crypto.randomBytes(32).toString('hex');
-    ssoCodes.set(code, { userId: req.authUser!.id, expiresAt: Date.now() + env.ssoCodeTtlSeconds * 1000 });
+    const code = issueSsoCode(req.authUser!.id);
     await writeAuditLog({ userId: req.authUser!.id, eventType: 'SSO_ISSUE', ipAddress: clientIp(req) });
     res.json({ code });
   } catch (err) {
@@ -103,10 +88,9 @@ router.post('/sso/issue', requireAuth, async (req, res, next) => {
 router.post('/sso/exchange', async (req, res, next) => {
   try {
     const { code } = req.body || {};
-    const entry = code ? ssoCodes.get(code) : null;
-    if (code) ssoCodes.delete(code);
+    const userId = code ? consumeSsoCode(code) : null;
 
-    if (!entry || entry.expiresAt < Date.now()) {
+    if (!userId) {
       res.status(401).json({ error: 'This sign-in link has expired - please try again from the originating app.' });
       return;
     }
@@ -114,7 +98,7 @@ router.post('/sso/exchange', async (req, res, next) => {
     const pool = await getPool();
     const result = await pool
       .request()
-      .input('id', sql.Int, entry.userId)
+      .input('id', sql.Int, userId)
       .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt FROM Users WHERE UserId = @id');
 
     const user = result.recordset[0];
