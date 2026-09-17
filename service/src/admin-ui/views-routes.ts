@@ -12,6 +12,18 @@ import { consumeSsoCode } from '../lib/ssoCodes';
 
 const MIN_PASSWORD_LENGTH = 8; // architecture doc §16.5
 
+// MobileNumber is stored as a single "+<code><digits>" string - collected
+// for future OTP delivery. India-only for now (every current user is based
+// in India); add more entries here once OTP delivery actually needs them.
+const COUNTRY_CODES = [{ code: '+91', label: '+91 (IN)' }];
+const DEFAULT_COUNTRY_CODE = '+91';
+
+function splitMobileNumber(mobile: string | null | undefined): { countryCode: string; number: string } {
+  if (!mobile) return { countryCode: DEFAULT_COUNTRY_CODE, number: '' };
+  const match = [...COUNTRY_CODES].sort((a, b) => b.code.length - a.code.length).find((c) => mobile.startsWith(c.code));
+  return match ? { countryCode: match.code, number: mobile.slice(match.code.length) } : { countryCode: DEFAULT_COUNTRY_CODE, number: mobile };
+}
+
 const router = Router();
 const ADMIN_SESSION_COOKIE = 'iam_admin_session';
 const ADMIN_PERMISSION = 'iam.admin.manage';
@@ -42,10 +54,38 @@ function requireUiAuth(req: Request, res: Response, next: NextFunction): void {
     return;
   }
   req.headers.authorization = `Bearer ${session.token}`;
+
+  // requireAuth below speaks JSON and returns a bare 401 if this bridged
+  // token has gone stale server-side since the cookie was minted - most
+  // commonly a password change (here or from another app like Company
+  // Portal) bumping TokenValidAfter past this token's iat. The admin
+  // console renders pages, not JSON, so intercept that one response and
+  // bounce back to login instead of leaking raw JSON to the browser.
+  const originalJson = res.json.bind(res);
+  res.json = ((body: unknown) => {
+    if (res.statusCode === 401) {
+      adminSessions.delete(sessionId!);
+      res.clearCookie(ADMIN_SESSION_COOKIE);
+      return res.redirect('/admin-ui/login');
+    }
+    return originalJson(body);
+  }) as typeof res.json;
+
   next();
 }
 
-const requireUiAdmin = [requireUiAuth, requireAuth, requirePermission(ADMIN_PERMISSION)];
+// My Account is reachable even with a pending mandatory change (it's the
+// only way out of one) - every other admin-console page is not.
+function blockIfMustChangePassword(req: Request, res: Response, next: NextFunction): void {
+  if (req.authUser!.mustChangePassword) {
+    res.redirect('/admin-ui/account');
+    return;
+  }
+  next();
+}
+
+const requireUiAccount = [requireUiAuth, requireAuth, requirePermission(ADMIN_PERMISSION)];
+const requireUiAdmin = [...requireUiAccount, blockIfMustChangePassword];
 
 // Shared by the password form and the SSO handoff below - both end up
 // needing the same cookie + in-memory session record once a userId/username
@@ -70,18 +110,24 @@ function startAdminSession(req: Request, res: Response, userId: number, username
 
 router.get('/login', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const sessionId = req.cookies?.[ADMIN_SESSION_COOKIE];
-    if (sessionId && adminSessions.has(sessionId)) {
-      res.redirect('/admin-ui');
-      return;
-    }
-
     // Tile-click handoff from another app (e.g. Company Portal) that already
     // holds a signed-in user - same single-use code a satellite app's
     // backend would exchange over HTTP, consumed in-process here instead
-    // since the admin console *is* this service.
+    // since the admin console *is* this service. Checked *before* the
+    // existing-cookie shortcut below: arriving with a fresh code means "sign
+    // this identity in now", not "resume whatever's cached" - and a stale
+    // cached session here would otherwise swallow the code (redirecting to
+    // /admin-ui) only to bounce back to a bare login page once that stale
+    // token gets caught downstream (see requireUiAuth), burning the
+    // single-use code for nothing on the first click.
     const ssoCode = typeof req.query.ssoCode === 'string' ? req.query.ssoCode : null;
+
     if (!ssoCode) {
+      const sessionId = req.cookies?.[ADMIN_SESSION_COOKIE];
+      if (sessionId && adminSessions.has(sessionId)) {
+        res.redirect('/admin-ui');
+        return;
+      }
       res.render('login', { error: null });
       return;
     }
@@ -160,26 +206,38 @@ router.post('/logout', (req: Request, res: Response) => {
 
 // --- My Account (self-service - profile + change own password) ------------
 
-router.get('/account', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/account', ...requireUiAccount, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const pool = await getPool();
     const result = await pool
       .request()
       .input('id', sql.Int, req.authUser!.id)
       .query('SELECT UserId, Username, Email, DisplayName, LastLoginAt, PasswordChangedAt FROM Users WHERE UserId = @id');
-    res.render('account', { authUser: req.authUser, account: result.recordset[0], error: null, notice: null });
+    res.render('account', {
+      authUser: req.authUser,
+      account: result.recordset[0],
+      error: null,
+      notice: null,
+      mustChangePassword: req.authUser!.mustChangePassword,
+    });
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/account', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/account', ...requireUiAccount, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { displayName, email } = req.body || {};
     if (!email) {
       const pool = await getPool();
       const result = await pool.request().input('id', sql.Int, req.authUser!.id).query('SELECT UserId, Username, Email, DisplayName, LastLoginAt, PasswordChangedAt FROM Users WHERE UserId = @id');
-      res.status(400).render('account', { authUser: req.authUser, account: result.recordset[0], error: 'Email is required.', notice: null });
+      res.status(400).render('account', {
+        authUser: req.authUser,
+        account: result.recordset[0],
+        error: 'Email is required.',
+        notice: null,
+        mustChangePassword: req.authUser!.mustChangePassword,
+      });
       return;
     }
 
@@ -192,13 +250,19 @@ router.post('/account', ...requireUiAdmin, async (req: Request, res: Response, n
       .query('UPDATE Users SET DisplayName = @displayName, Email = @email WHERE UserId = @id');
 
     const result = await pool.request().input('id', sql.Int, req.authUser!.id).query('SELECT UserId, Username, Email, DisplayName, LastLoginAt, PasswordChangedAt FROM Users WHERE UserId = @id');
-    res.render('account', { authUser: { ...req.authUser!, displayName: displayName || req.authUser!.username }, account: result.recordset[0], error: null, notice: 'Profile updated.' });
+    res.render('account', {
+      authUser: { ...req.authUser!, displayName: displayName || req.authUser!.username },
+      account: result.recordset[0],
+      error: null,
+      notice: 'Profile updated.',
+      mustChangePassword: req.authUser!.mustChangePassword,
+    });
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/account/change-password', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/account/change-password', ...requireUiAccount, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
     const pool = await getPool();
@@ -206,7 +270,7 @@ router.post('/account/change-password', ...requireUiAdmin, async (req: Request, 
     const account = accountResult.recordset[0];
 
     async function rerender(status: number, error: string) {
-      res.status(status).render('account', { authUser: req.authUser, account, error, notice: null });
+      res.status(status).render('account', { authUser: req.authUser, account, error, notice: null, mustChangePassword: req.authUser!.mustChangePassword });
     }
 
     if (!currentPassword || !newPassword) {
@@ -223,12 +287,18 @@ router.post('/account/change-password', ...requireUiAdmin, async (req: Request, 
       return;
     }
 
+    const sameAsCurrent = await bcrypt.compare(newPassword, account.PasswordHash);
+    if (sameAsCurrent) {
+      await rerender(400, 'New password must be different from your current password.');
+      return;
+    }
+
     const passwordHash = await bcrypt.hash(newPassword, 12);
     await pool
       .request()
       .input('id', sql.Int, req.authUser!.id)
       .input('passwordHash', sql.NVarChar(255), passwordHash)
-      .query('UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME() WHERE UserId = @id');
+      .query('UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME(), MustChangePassword = 0 WHERE UserId = @id');
 
     await writeAuditLog({ userId: req.authUser!.id, eventType: 'PASSWORD_CHANGED', ipAddress: clientIp(req) });
 
@@ -245,7 +315,7 @@ router.post('/account/change-password', ...requireUiAdmin, async (req: Request, 
       expiresAt: Date.now() + env.sessionTtlHours * 60 * 60 * 1000,
     });
 
-    res.render('account', { authUser: req.authUser, account, error: null, notice: 'Password changed.' });
+    res.render('account', { authUser: req.authUser, account, error: null, notice: 'Password changed.', mustChangePassword: false });
   } catch (err) {
     next(err);
   }
@@ -307,12 +377,16 @@ router.get('/users', ...requireUiAdmin, async (req: Request, res: Response, next
 });
 
 router.get('/users/new', ...requireUiAdmin, (req: Request, res: Response) => {
-  res.render('user-new', { authUser: req.authUser, error: null });
+  res.render('user-new', { authUser: req.authUser, error: null, countryCodes: COUNTRY_CODES, defaultCountryCode: DEFAULT_COUNTRY_CODE });
 });
 
 router.post('/users/new', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { username, email, firstName, middleName, lastName, displayName, password, confirmPassword } = req.body || {};
+    const { username, email, firstName, middleName, lastName, displayName, countryCode, mobileNumber, password, confirmPassword } = req.body || {};
+    const renderError = (status: number, error: string) =>
+      res.status(status).render('user-new', { authUser: req.authUser, error, countryCodes: COUNTRY_CODES, defaultCountryCode: DEFAULT_COUNTRY_CODE });
+
+    const mobileDigits = String(mobileNumber || '').replace(/\D/g, '');
     if (
       !username ||
       String(username).trim().length < 3 ||
@@ -322,13 +396,15 @@ router.post('/users/new', ...requireUiAdmin, async (req: Request, res: Response,
       !password ||
       String(password).length < 8
     ) {
-      res
-        .status(400)
-        .render('user-new', { authUser: req.authUser, error: 'Username (3+ chars), first name, last name, display name, and an 8+ character password are required.' });
+      renderError(400, 'Username (3+ chars), first name, last name, display name, mobile number, and an 8+ character password are required.');
+      return;
+    }
+    if (mobileDigits.length !== 10) {
+      renderError(400, 'Mobile number must be exactly 10 digits.');
       return;
     }
     if (password !== confirmPassword) {
-      res.status(400).render('user-new', { authUser: req.authUser, error: 'Password and confirm password do not match.' });
+      renderError(400, 'Password and confirm password do not match.');
       return;
     }
 
@@ -336,6 +412,7 @@ router.post('/users/new', ...requireUiAdmin, async (req: Request, res: Response,
     // address (see portal-integration-instructions.md) - Email is NOT NULL
     // + UNIQUE at the DB level, so a blank form field still needs some value.
     const resolvedEmail = email || `${username}@syncaxis.com`;
+    const resolvedMobile = `${countryCode || DEFAULT_COUNTRY_CODE}${mobileDigits}`;
 
     const pool = await getPool();
     const existing = await pool
@@ -344,7 +421,7 @@ router.post('/users/new', ...requireUiAdmin, async (req: Request, res: Response,
       .input('email', sql.NVarChar(255), resolvedEmail)
       .query('SELECT UserId FROM Users WHERE Username = @username OR Email = @email');
     if (existing.recordset[0]) {
-      res.status(409).render('user-new', { authUser: req.authUser, error: 'A user with that username or email already exists.' });
+      renderError(409, 'A user with that username or email already exists.');
       return;
     }
 
@@ -359,9 +436,13 @@ router.post('/users/new', ...requireUiAdmin, async (req: Request, res: Response,
       .input('middleName', sql.NVarChar(100), middleName || null)
       .input('lastName', sql.NVarChar(100), lastName || null)
       .input('displayName', sql.NVarChar(200), displayName || firstName || username)
+      .input('mobileNumber', sql.NVarChar(20), resolvedMobile)
       .input('passwordHash', sql.NVarChar(255), passwordHash)
       .query(
-        'INSERT INTO Users (Username, Email, FirstName, MiddleName, LastName, DisplayName, PasswordHash) VALUES (@username, @email, @firstName, @middleName, @lastName, @displayName, @passwordHash); SELECT CAST(SCOPE_IDENTITY() AS INT) AS UserId;',
+        // MustChangePassword defaults to 1 - a password set by an admin at
+        // creation time is treated as temporary, same as an admin reset
+        // below (architecture doc §10).
+        'INSERT INTO Users (Username, Email, FirstName, MiddleName, LastName, DisplayName, MobileNumber, PasswordHash, MustChangePassword) VALUES (@username, @email, @firstName, @middleName, @lastName, @displayName, @mobileNumber, @passwordHash, 1); SELECT CAST(SCOPE_IDENTITY() AS INT) AS UserId;',
       );
 
     res.redirect(`/admin-ui/users/${result.recordset[0].UserId}`);
@@ -378,7 +459,7 @@ router.get('/users/:id', ...requireUiAdmin, async (req: Request, res: Response, 
     const userResult = await pool
       .request()
       .input('id', sql.Int, userId)
-      .query('SELECT UserId, Username, Email, FirstName, MiddleName, LastName, DisplayName, IsActive, IsLocked, FailedLoginCount, LastLoginAt, CreatedAt FROM Users WHERE UserId = @id');
+      .query('SELECT UserId, Username, Email, FirstName, MiddleName, LastName, DisplayName, MobileNumber, IsActive, IsLocked, MustChangePassword, FailedLoginCount, LastLoginAt, CreatedAt FROM Users WHERE UserId = @id');
     const user = userResult.recordset[0];
     if (!user) {
       res.status(404).send('User not found.');
@@ -395,6 +476,8 @@ router.get('/users/:id', ...requireUiAdmin, async (req: Request, res: Response, 
     res.render('user-detail', {
       authUser: req.authUser,
       user,
+      mobile: splitMobileNumber(user.MobileNumber),
+      countryCodes: COUNTRY_CODES,
       allRoles: allRoles.recordset,
       roleIds: (userRoles.recordset as { RoleId: number }[]).map((r) => r.RoleId),
       allGroups: allGroups.recordset,
@@ -408,7 +491,13 @@ router.get('/users/:id', ...requireUiAdmin, async (req: Request, res: Response, 
 router.post('/users/:id', ...requireUiAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = Number(req.params.id);
-    const { firstName, middleName, lastName, displayName, email, isActive, isLocked } = req.body || {};
+    const { firstName, middleName, lastName, displayName, email, countryCode, mobileNumber, isActive, isLocked, mustChangePassword } = req.body || {};
+    const mobileDigits = String(mobileNumber || '').replace(/\D/g, '');
+    if (mobileDigits.length !== 10) {
+      res.status(400).send('Mobile number must be exactly 10 digits.');
+      return;
+    }
+    const resolvedMobile = `${countryCode || DEFAULT_COUNTRY_CODE}${mobileDigits}`;
     const pool = await getPool();
     await pool
       .request()
@@ -418,10 +507,12 @@ router.post('/users/:id', ...requireUiAdmin, async (req: Request, res: Response,
       .input('lastName', sql.NVarChar(100), lastName || null)
       .input('displayName', sql.NVarChar(200), displayName || null)
       .input('email', sql.NVarChar(255), email)
+      .input('mobileNumber', sql.NVarChar(20), resolvedMobile)
       .input('isActive', sql.Bit, isActive === 'true')
       .input('isLocked', sql.Bit, isLocked === 'true')
+      .input('mustChangePassword', sql.Bit, mustChangePassword === 'true')
       .query(
-        'UPDATE Users SET FirstName = @firstName, MiddleName = @middleName, LastName = @lastName, DisplayName = @displayName, Email = @email, IsActive = @isActive, IsLocked = @isLocked, FailedLoginCount = CASE WHEN @isLocked = 0 THEN 0 ELSE FailedLoginCount END WHERE UserId = @id',
+        'UPDATE Users SET FirstName = @firstName, MiddleName = @middleName, LastName = @lastName, DisplayName = @displayName, Email = @email, MobileNumber = @mobileNumber, IsActive = @isActive, IsLocked = @isLocked, MustChangePassword = @mustChangePassword, FailedLoginCount = CASE WHEN @isLocked = 0 THEN 0 ELSE FailedLoginCount END WHERE UserId = @id',
       );
     res.redirect(`/admin-ui/users/${userId}`);
   } catch (err) {
@@ -447,7 +538,10 @@ router.post('/users/:id/reset-password', ...requireUiAdmin, async (req: Request,
       .request()
       .input('id', sql.Int, userId)
       .input('passwordHash', sql.NVarChar(255), passwordHash)
-      .query('UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME() WHERE UserId = @id');
+      // An admin-set password is always treated as temporary - the user
+      // must change it themselves on their next login, same as a brand-new
+      // account (architecture doc §10).
+      .query('UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME(), MustChangePassword = 1 WHERE UserId = @id');
     res.redirect(`/admin-ui/users/${userId}`);
   } catch (err) {
     next(err);

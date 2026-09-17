@@ -1,5 +1,6 @@
 <%- include('partials/header', { title: 'My Account', active: 'account', authUser }) %>
 
+<% if (typeof mustChangePassword !== 'undefined' && mustChangePassword) { %><div class="error">You must set a new password before continuing to the rest of the admin console.</div><% } %>
 <% if (typeof notice !== 'undefined' && notice) { %><div class="card" style="background:#e3f7e9;border-color:#bfe8c9;"><%= notice %></div><% } %>
 <% if (typeof error !== 'undefined' && error) { %><div class="error"><%= error %></div><% } %>
 

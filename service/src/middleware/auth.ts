@@ -16,7 +16,14 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      authUser?: { id: number; username: string; displayName: string; isActive: boolean; lastLoginAt: Date | null };
+      authUser?: {
+        id: number;
+        username: string;
+        displayName: string;
+        isActive: boolean;
+        lastLoginAt: Date | null;
+        mustChangePassword: boolean;
+      };
     }
   }
 }
@@ -47,7 +54,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const result = await pool
       .request()
       .input('id', sql.Int, payload.sub)
-      .query('SELECT UserId, Username, DisplayName, IsActive, TokenValidAfter, LastLoginAt FROM Users WHERE UserId = @id');
+      .query('SELECT UserId, Username, DisplayName, IsActive, TokenValidAfter, LastLoginAt, MustChangePassword FROM Users WHERE UserId = @id');
 
     const user = result.recordset[0];
     if (!user || !user.IsActive) {
@@ -71,6 +78,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       displayName: user.DisplayName || user.Username,
       isActive: user.IsActive,
       lastLoginAt: user.LastLoginAt,
+      mustChangePassword: Boolean(user.MustChangePassword),
     };
     next();
   } catch (err) {

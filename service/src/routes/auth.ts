@@ -22,6 +22,8 @@ interface PublicUserRow {
   DisplayName: string | null;
   IsActive: boolean;
   LastLoginAt: Date | null;
+  PasswordChangedAt: Date | null;
+  MustChangePassword: boolean;
 }
 
 function toUserSummary(user: PublicUserRow, access: EffectiveAccess) {
@@ -34,6 +36,8 @@ function toUserSummary(user: PublicUserRow, access: EffectiveAccess) {
     perms: [...access.perms],
     isFullAccess: access.isFullAccess,
     lastLoginAt: user.LastLoginAt ? new Date(user.LastLoginAt).toISOString() : null,
+    passwordChangedAt: user.PasswordChangedAt ? new Date(user.PasswordChangedAt).toISOString() : null,
+    mustChangePassword: Boolean(user.MustChangePassword),
   };
 }
 
@@ -56,7 +60,7 @@ router.post('/login', async (req, res, next) => {
     const result = await pool
       .request()
       .input('id', sql.Int, outcome.userId)
-      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt FROM Users WHERE UserId = @id');
+      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt, PasswordChangedAt, MustChangePassword FROM Users WHERE UserId = @id');
     const user = result.recordset[0];
     const access = await getEffectiveAccess(pool, user.UserId);
 
@@ -99,7 +103,7 @@ router.post('/sso/exchange', async (req, res, next) => {
     const result = await pool
       .request()
       .input('id', sql.Int, userId)
-      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt FROM Users WHERE UserId = @id');
+      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt, PasswordChangedAt, MustChangePassword FROM Users WHERE UserId = @id');
 
     const user = result.recordset[0];
     if (!user || !user.IsActive) {
@@ -127,7 +131,7 @@ router.get('/me', requireAuth, async (req, res, next) => {
     const result = await pool
       .request()
       .input('id', sql.Int, req.authUser!.id)
-      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt FROM Users WHERE UserId = @id');
+      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt, PasswordChangedAt, MustChangePassword FROM Users WHERE UserId = @id');
 
     const user = result.recordset[0];
     const access = await getEffectiveAccess(pool, req.authUser!.id);
@@ -168,12 +172,20 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
       return;
     }
 
+    const sameAsCurrent = await bcrypt.compare(newPassword, row.PasswordHash);
+    if (sameAsCurrent) {
+      res.status(400).json({ error: 'New password must be different from your current password.' });
+      return;
+    }
+
     const passwordHash = await bcrypt.hash(newPassword, 12);
     await pool
       .request()
       .input('id', sql.Int, req.authUser!.id)
       .input('passwordHash', sql.NVarChar(255), passwordHash)
-      .query('UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME() WHERE UserId = @id');
+      .query(
+        'UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME(), MustChangePassword = 0 WHERE UserId = @id',
+      );
 
     await writeAuditLog({ userId: req.authUser!.id, eventType: 'PASSWORD_CHANGED', ipAddress: clientIp(req) });
     res.status(204).end();

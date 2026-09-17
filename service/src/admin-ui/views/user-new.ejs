@@ -22,6 +22,15 @@
     <input type="text" name="displayName" required />
     <label>Email</label>
     <input type="email" name="email" />
+    <label class="required">Mobile number</label>
+    <div style="display:flex; gap:8px;">
+      <select name="countryCode" style="max-width:110px; flex:0 0 110px;">
+        <% countryCodes.forEach(function(c) { %>
+          <option value="<%= c.code %>" <%= c.code === defaultCountryCode ? 'selected' : '' %>><%= c.label %></option>
+        <% }) %>
+      </select>
+      <input type="tel" name="mobileNumber" required pattern="[0-9]{10}" maxlength="10" title="Enter a 10-digit mobile number" style="max-width:160px; flex:0 0 160px;" />
+    </div>
     <label class="required">Username</label>
     <input type="text" name="username" required />
     <label class="required">Initial password</label>

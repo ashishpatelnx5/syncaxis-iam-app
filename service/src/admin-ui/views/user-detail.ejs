@@ -28,12 +28,24 @@
     <input type="text" name="displayName" value="<%= user.DisplayName || '' %>" disabled />
     <label>Email</label>
     <input type="email" name="email" value="<%= user.Email %>" disabled />
+    <label class="required">Mobile number</label>
+    <div style="display:flex; gap:8px;">
+      <select name="countryCode" style="max-width:110px; flex:0 0 110px;" disabled>
+        <% countryCodes.forEach(function(c) { %>
+          <option value="<%= c.code %>" <%= c.code === mobile.countryCode ? 'selected' : '' %>><%= c.label %></option>
+        <% }) %>
+      </select>
+      <input type="tel" name="mobileNumber" value="<%= mobile.number %>" required pattern="[0-9]{10}" maxlength="10" title="Enter a 10-digit mobile number" style="max-width:160px; flex:0 0 160px;" disabled />
+    </div>
     <div style="display:flex; gap:24px; margin-top:14px;">
       <label style="display:inline-flex;align-items:center;gap:6px;">
         <input type="checkbox" name="isActive" value="true" <%= user.IsActive ? 'checked' : '' %> style="width:auto;" disabled /> Active
       </label>
       <label style="display:inline-flex;align-items:center;gap:6px;">
         <input type="checkbox" name="isLocked" value="true" <%= user.IsLocked ? 'checked' : '' %> style="width:auto;" disabled /> Locked
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;">
+        <input type="checkbox" name="mustChangePassword" value="true" <%= user.MustChangePassword ? 'checked' : '' %> style="width:auto;" disabled /> Must change password
       </label>
     </div>
   </form>
@@ -126,7 +138,7 @@
   // Roles, Groups) as one unit - checkboxes no longer save themselves on
   // `change`; they're just disabled inputs the user can't touch until Edit
   // is clicked, and Save is what actually sends anything to the server.
-  var editableFields = document.querySelectorAll('#profileForm input, .role-toggle, .group-toggle');
+  var editableFields = document.querySelectorAll('#profileForm input, #profileForm select, .role-toggle, .group-toggle');
   var editBtn = document.getElementById('editBtn');
   var saveBtn = document.getElementById('saveBtn');
   var cancelBtn = document.getElementById('cancelBtn');
@@ -145,6 +157,11 @@
   cancelBtn.addEventListener('click', function () { location.reload(); }); // discards any unsaved changes
 
   saveBtn.addEventListener('click', function () {
+    // profileForm.submit() below bypasses constraint validation (unlike a
+    // real submit-button click), so required fields like Mobile number need
+    // an explicit check here or a blank one would silently save.
+    if (!profileForm.reportValidity()) return;
+
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving…';
 

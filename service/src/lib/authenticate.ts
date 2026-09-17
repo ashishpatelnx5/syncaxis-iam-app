@@ -10,6 +10,7 @@ export interface LoginOutcome {
   error?: string;
   userId?: number;
   username?: string;
+  mustChangePassword?: boolean;
 }
 
 // Shared by POST /auth/login and the admin console's own login form
@@ -25,7 +26,7 @@ export async function attemptLogin(
   const result = await pool
     .request()
     .input('username', sql.NVarChar(100), String(username).trim())
-    .query('SELECT UserId, Username, PasswordHash, IsActive, IsLocked, FailedLoginCount FROM Users WHERE Username = @username');
+    .query('SELECT UserId, Username, PasswordHash, IsActive, IsLocked, FailedLoginCount, MustChangePassword FROM Users WHERE Username = @username');
 
   const user = result.recordset[0];
   const invalid: LoginOutcome = { ok: false, status: 401, error: 'Incorrect username or password.' };
@@ -70,5 +71,5 @@ export async function attemptLogin(
     .query('UPDATE Users SET FailedLoginCount = 0, LastLoginAt = SYSUTCDATETIME() WHERE UserId = @id');
 
   await writeAuditLog({ userId: user.UserId, eventType: 'LOGIN_SUCCESS', ipAddress, appKey });
-  return { ok: true, status: 200, userId: user.UserId, username: user.Username };
+  return { ok: true, status: 200, userId: user.UserId, username: user.Username, mustChangePassword: Boolean(user.MustChangePassword) };
 }
