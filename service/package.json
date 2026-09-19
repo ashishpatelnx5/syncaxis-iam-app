@@ -6,10 +6,11 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').cpSync('src/admin-ui/views','dist/src/admin-ui/views',{recursive:true});require('fs').cpSync('src/admin-ui/public','dist/src/admin-ui/public',{recursive:true})\"",
+    "start": "node dist/src/server.js",
     "seed": "ts-node-dev --transpile-only scripts/seed.ts",
-    "migrate:portal-users": "ts-node-dev --transpile-only scripts/migrate-portal-users.ts"
+    "migrate:portal-users": "ts-node-dev --transpile-only scripts/migrate-portal-users.ts",
+    "export:prod-data": "ts-node --transpile-only scripts/export-prod-data.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
