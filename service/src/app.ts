@@ -4,6 +4,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet, { contentSecurityPolicy } from 'helmet';
 import path from 'path';
+import { env } from './config/env';
 import authRoutes from './routes/auth';
 import healthRoutes from './routes/health';
 import adminAppsRoutes from './routes/admin/apps';
@@ -12,6 +13,12 @@ import adminRolesRoutes from './routes/admin/roles';
 import adminGroupsRoutes from './routes/admin/groups';
 import adminAuditRoutes from './routes/admin/audit';
 import adminUiRoutes from './admin-ui/views-routes';
+
+// Helmet's defaults minus upgrade-insecure-requests unless HTTPS_ONLY is on
+// (see env.httpsOnly). Built explicitly with useDefaults:false because Helmet
+// treats a null override as "keep the default", not "remove it".
+const { 'upgrade-insecure-requests': upgradeInsecure, ...cspDefaultsWithoutUpgrade } = contentSecurityPolicy.getDefaultDirectives();
+const cspDefaults = env.httpsOnly ? { ...cspDefaultsWithoutUpgrade, 'upgrade-insecure-requests': upgradeInsecure } : cspDefaultsWithoutUpgrade;
 
 export function createApp() {
   const app = express();
@@ -31,8 +38,9 @@ export function createApp() {
   app.use(
     helmet({
       contentSecurityPolicy: {
+        useDefaults: false,
         directives: {
-          ...contentSecurityPolicy.getDefaultDirectives(),
+          ...cspDefaults,
           // admin-ui's checkbox auto-save/delete-confirm scripts are inline
           // (server-rendered alongside their data, e.g. role/group ids) -
           // nonce them individually rather than allowing 'unsafe-inline'.
