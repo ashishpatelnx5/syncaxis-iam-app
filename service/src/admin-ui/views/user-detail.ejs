@@ -1,29 +1,64 @@
 <%- include('partials/header', { title: 'User: ' + user.Username, active: 'users', authUser }) %>
 
 <div class="card">
-  <h2 style="margin-top:0;">Profile</h2>
-  <form method="post" action="/admin-ui/users/<%= user.UserId %>">
+  <div style="display:flex; align-items:center; justify-content:space-between;">
+    <h2 style="margin-top:0;">Profile</h2>
+    <div>
+      <button type="button" id="editBtn">Edit</button>
+      <button type="button" id="saveBtn" style="display:none;">Save</button>
+      <button type="button" id="cancelBtn" class="secondary" style="display:none;">Cancel</button>
+    </div>
+  </div>
+  <form method="post" action="/admin-ui/users/<%= user.UserId %>" id="profileForm">
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+      <div style="flex:1 1 160px;">
+        <label>First name</label>
+        <input type="text" name="firstName" value="<%= user.FirstName || '' %>" style="max-width:none;" disabled />
+      </div>
+      <div style="flex:1 1 160px;">
+        <label>Middle name</label>
+        <input type="text" name="middleName" value="<%= user.MiddleName || '' %>" style="max-width:none;" disabled />
+      </div>
+      <div style="flex:1 1 160px;">
+        <label>Last name</label>
+        <input type="text" name="lastName" value="<%= user.LastName || '' %>" style="max-width:none;" disabled />
+      </div>
+    </div>
     <label>Display name</label>
-    <input type="text" name="displayName" value="<%= user.DisplayName || '' %>" />
+    <input type="text" name="displayName" value="<%= user.DisplayName || '' %>" disabled />
     <label>Email</label>
-    <input type="email" name="email" value="<%= user.Email %>" />
-    <label style="display:inline-flex;align-items:center;gap:6px;margin-top:14px;">
-      <input type="checkbox" name="isActive" value="true" <%= user.IsActive ? 'checked' : '' %> style="width:auto;" /> Active
-    </label>
-    <br/>
-    <label style="display:inline-flex;align-items:center;gap:6px;">
-      <input type="checkbox" name="isLocked" value="true" <%= user.IsLocked ? 'checked' : '' %> style="width:auto;" /> Locked
-    </label>
-    <div><button type="submit" style="margin-top:14px;">Save profile</button></div>
+    <input type="email" name="email" value="<%= user.Email %>" disabled />
+    <label class="required">Mobile number</label>
+    <div style="display:flex; gap:8px;">
+      <select name="countryCode" style="max-width:110px; flex:0 0 110px;" disabled>
+        <% countryCodes.forEach(function(c) { %>
+          <option value="<%= c.code %>" <%= c.code === mobile.countryCode ? 'selected' : '' %>><%= c.label %></option>
+        <% }) %>
+      </select>
+      <input type="tel" name="mobileNumber" value="<%= mobile.number %>" required pattern="[0-9]{10}" maxlength="10" title="Enter a 10-digit mobile number" style="max-width:160px; flex:0 0 160px;" disabled />
+    </div>
+    <div style="display:flex; gap:24px; margin-top:14px;">
+      <label style="display:inline-flex;align-items:center;gap:6px;">
+        <input type="checkbox" name="isActive" value="true" <%= user.IsActive ? 'checked' : '' %> style="width:auto;" disabled /> Active
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;">
+        <input type="checkbox" name="isLocked" value="true" <%= user.IsLocked ? 'checked' : '' %> style="width:auto;" disabled /> Locked
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;">
+        <input type="checkbox" name="mustChangePassword" value="true" <%= user.MustChangePassword ? 'checked' : '' %> style="width:auto;" disabled /> Must change password
+      </label>
+    </div>
   </form>
   <p class="muted">Failed login attempts: <%= user.FailedLoginCount %> · Created <%= new Date(user.CreatedAt).toLocaleString() %> · Last login <%= user.LastLoginAt ? new Date(user.LastLoginAt).toLocaleString() : 'never' %></p>
 </div>
 
 <div class="card">
   <h2 style="margin-top:0;">Reset password</h2>
-  <form method="post" action="/admin-ui/users/<%= user.UserId %>/reset-password">
-    <label>New password</label>
-    <input type="password" name="password" required minlength="8" />
+  <form method="post" action="/admin-ui/users/<%= user.UserId %>/reset-password" id="resetPasswordForm">
+    <label class="required">New password</label>
+    <div class="pwd-wrap"><input type="password" name="password" id="resetPassword" required minlength="8" /></div>
+    <label class="required">Confirm new password</label>
+    <div class="pwd-wrap"><input type="password" name="confirmPassword" id="resetConfirmPassword" required minlength="8" /></div>
     <button type="submit" style="margin-top:14px;">Reset password</button>
   </form>
   <p class="muted">Also invalidates every existing session for this user (bumps TokenValidAfter).</p>
@@ -31,10 +66,10 @@
 
 <div class="card">
   <h2 style="margin-top:0;">Roles</h2>
-  <p class="muted">Toggling a role here changes what this user can do across every app immediately (next re-verify, ≤5 min).</p>
+  <p class="muted">Click Edit above to change roles. Saved changes take effect across every app within one re-verify cycle (≤5 min).</p>
   <% allRoles.forEach(function(r) { %>
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:18px;">
-      <input type="checkbox" class="role-toggle" data-role-id="<%= r.RoleId %>" <%= roleIds.includes(r.RoleId) ? 'checked' : '' %> style="width:auto;" />
+      <input type="checkbox" class="role-toggle" data-role-id="<%= r.RoleId %>" <%= roleIds.includes(r.RoleId) ? 'checked' : '' %> style="width:auto;" disabled />
       <%= r.Name %><% if (r.IsFullAccess) { %> <span class="badge role">full access</span><% } %>
     </label>
   <% }) %>
@@ -44,7 +79,7 @@
   <h2 style="margin-top:0;">Groups</h2>
   <% allGroups.forEach(function(g) { %>
     <label style="display:inline-flex;align-items:center;gap:6px;margin-right:18px;">
-      <input type="checkbox" class="group-toggle" data-group-id="<%= g.GroupId %>" <%= groupIds.includes(g.GroupId) ? 'checked' : '' %> style="width:auto;" />
+      <input type="checkbox" class="group-toggle" data-group-id="<%= g.GroupId %>" <%= groupIds.includes(g.GroupId) ? 'checked' : '' %> style="width:auto;" disabled />
       <%= g.Name %>
     </label>
   <% }) %>
@@ -59,35 +94,117 @@
   </form>
 </div>
 
+<div class="card">
+  <h2 style="margin-top:0;">Delete user</h2>
+  <% if (authUser.id === user.UserId) { %>
+    <p class="muted">You can't delete your own account while signed in as them.</p>
+  <% } else { %>
+    <p class="muted">Permanently removes this account, including their role and group memberships. Audit log entries are kept but no longer show a username. This cannot be undone — deactivating (Active/Locked above) is usually the safer choice.</p>
+    <form method="post" action="/admin-ui/users/<%= user.UserId %>/delete" id="deleteUserForm">
+      <button type="submit" class="danger">Delete user</button>
+    </form>
+  <% } %>
+</div>
+
 <script nonce="<%= cspNonce %>">
   var forceLogoutForm = document.getElementById('forceLogoutForm');
   if (forceLogoutForm) {
     forceLogoutForm.addEventListener('submit', function (e) {
-      if (!confirm('Force logout everywhere for this user?')) e.preventDefault();
+      e.preventDefault();
+      window.confirmModal('Force logout everywhere for this user?').then(function (ok) {
+        if (ok) forceLogoutForm.submit();
+      });
     });
   }
-  function toggle(el, url, idField) {
-    var checked = el.checked;
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [idField]: Number(el.dataset[idField === 'roleId' ? 'roleId' : 'groupId']), action: checked ? 'add' : 'remove' }),
-      keepalive: true, // this page also has normal <form> Save buttons - without
-                        // keepalive, clicking one right after a toggle can navigate
-                        // away before this request is sent, silently dropping it
-    }).then(function (r) {
-      if (!r.ok) el.checked = !checked;
-      window.flashToggleResult(el, r.ok);
-    }).catch(function () {
-      el.checked = !checked;
-      window.flashToggleResult(el, false);
+  var deleteUserForm = document.getElementById('deleteUserForm');
+  if (deleteUserForm) {
+    deleteUserForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      window.confirmModal('Delete this user? This cannot be undone.').then(function (ok) {
+        if (ok) deleteUserForm.submit();
+      });
     });
   }
-  document.querySelectorAll('.role-toggle').forEach(function (el) {
-    el.addEventListener('change', function () { toggle(el, '/admin-ui/users/<%= user.UserId %>/roles', 'roleId'); });
-  });
-  document.querySelectorAll('.group-toggle').forEach(function (el) {
-    el.addEventListener('change', function () { toggle(el, '/admin-ui/users/<%= user.UserId %>/groups', 'groupId'); });
+  (function () {
+    var pwd = document.getElementById('resetPassword');
+    var confirmPwd = document.getElementById('resetConfirmPassword');
+    function checkMatch() {
+      confirmPwd.setCustomValidity(pwd.value !== confirmPwd.value ? 'Passwords do not match.' : '');
+    }
+    pwd.addEventListener('input', checkMatch);
+    confirmPwd.addEventListener('input', checkMatch);
+  })();
+  // Edit/Save/Cancel for the whole page (Profile fields, Active/Locked,
+  // Roles, Groups) as one unit - checkboxes no longer save themselves on
+  // `change`; they're just disabled inputs the user can't touch until Edit
+  // is clicked, and Save is what actually sends anything to the server.
+  var editableFields = document.querySelectorAll('#profileForm input, #profileForm select, .role-toggle, .group-toggle');
+  var editBtn = document.getElementById('editBtn');
+  var saveBtn = document.getElementById('saveBtn');
+  var cancelBtn = document.getElementById('cancelBtn');
+  var profileForm = document.getElementById('profileForm');
+  var originalRoleIds = <%- JSON.stringify(roleIds) %>;
+  var originalGroupIds = <%- JSON.stringify(groupIds) %>;
+
+  function setEditing(on) {
+    editableFields.forEach(function (el) { el.disabled = !on; });
+    editBtn.style.display = on ? 'none' : '';
+    saveBtn.style.display = on ? '' : 'none';
+    cancelBtn.style.display = on ? '' : 'none';
+  }
+
+  editBtn.addEventListener('click', function () { setEditing(true); });
+  cancelBtn.addEventListener('click', function () { location.reload(); }); // discards any unsaved changes
+
+  saveBtn.addEventListener('click', function () {
+    // profileForm.submit() below bypasses constraint validation (unlike a
+    // real submit-button click), so required fields like Mobile number need
+    // an explicit check here or a blank one would silently save.
+    if (!profileForm.reportValidity()) return;
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+
+    // Only the roles/groups that actually changed get a request - not every
+    // checkbox on the page - same "add"/"remove" endpoints the old per-click
+    // auto-save used, just batched behind one Save instead of firing on
+    // every individual change.
+    var roleDiffs = [];
+    document.querySelectorAll('.role-toggle').forEach(function (el) {
+      var roleId = Number(el.dataset.roleId);
+      var wasChecked = originalRoleIds.includes(roleId);
+      if (el.checked !== wasChecked) {
+        roleDiffs.push(
+          fetch('/admin-ui/users/<%= user.UserId %>/roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roleId: roleId, action: el.checked ? 'add' : 'remove' }),
+          }),
+        );
+      }
+    });
+    var groupDiffs = [];
+    document.querySelectorAll('.group-toggle').forEach(function (el) {
+      var groupId = Number(el.dataset.groupId);
+      var wasChecked = originalGroupIds.includes(groupId);
+      if (el.checked !== wasChecked) {
+        groupDiffs.push(
+          fetch('/admin-ui/users/<%= user.UserId %>/groups', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ groupId: groupId, action: el.checked ? 'add' : 'remove' }),
+          }),
+        );
+      }
+    });
+
+    Promise.all(roleDiffs.concat(groupDiffs))
+      .then(function () { profileForm.submit(); }) // navigates to POST /users/:id, saving the profile fields too
+      .catch(function () {
+        alert('Some changes failed to save. Please try again.');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+      });
   });
 </script>
 

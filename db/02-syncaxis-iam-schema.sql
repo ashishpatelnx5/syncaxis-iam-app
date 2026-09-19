@@ -34,7 +34,13 @@ CREATE TABLE Users (
     Username        NVARCHAR(100)   NOT NULL,
     Email           NVARCHAR(255)   NOT NULL,
     PasswordHash    NVARCHAR(255)   NOT NULL,   -- bcrypt/argon2 hash, never plaintext
+    FirstName       NVARCHAR(100)   NULL,
+    MiddleName      NVARCHAR(100)   NULL,
+    LastName        NVARCHAR(100)   NULL,
     DisplayName     NVARCHAR(200)   NULL,
+    -- Collected for future OTP delivery (SMS/WhatsApp) - not yet used by any
+    -- login or verification flow.
+    MobileNumber    NVARCHAR(20)    NULL,
     IsActive        BIT             NOT NULL DEFAULT (1),
     IsLocked        BIT             NOT NULL DEFAULT (0),
     FailedLoginCount INT            NOT NULL DEFAULT (0),
@@ -47,6 +53,11 @@ CREATE TABLE Users (
     CreatedAt       DATETIME2       NOT NULL DEFAULT (SYSUTCDATETIME()),
     LastLoginAt     DATETIME2       NULL,
     PasswordChangedAt DATETIME2     NULL,
+    -- Set on account creation and on an admin's forced reset; cleared on the
+    -- user's own next successful password change. Every login path (Portal,
+    -- the admin console itself) must treat this as "let them in, but block
+    -- everything else until it's cleared".
+    MustChangePassword BIT          NOT NULL DEFAULT (0),
     CONSTRAINT UQ_Users_Username UNIQUE (Username),
     CONSTRAINT UQ_Users_Email UNIQUE (Email)
 );

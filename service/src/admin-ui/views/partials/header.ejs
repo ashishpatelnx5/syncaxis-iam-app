@@ -2,67 +2,182 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title><%= title %> · Syncaxis IAM Admin</title>
+<title>Syncaxis IAM Admin</title>
+<link rel="icon" href="/admin-ui/assets/favicon.png" />
+<script nonce="<%= cspNonce %>">
+  // Flash-of-wrong-theme prevention - must run before the stylesheet below,
+  // same localStorage key/convention as Company Portal's own theme.js so a
+  // manual override always beats the OS/browser prefers-color-scheme default.
+  (function () {
+    try {
+      var t = localStorage.getItem('syncaxis-theme');
+      if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
 <style>
-  :root { color-scheme: light; }
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #f0f1f4;
+    --border: #e3e5ea;
+    --text: #1c1f26;
+    --text-muted: #6b7280;
+    --accent: #2c3e50;
+    --accent-soft: rgba(44, 62, 80, .1);
+    --accent-contrast: #ffffff;
+    --danger: #c0392b;
+    --danger-soft: #fde8e8;
+    --success: #1b7a37;
+    --success-soft: #e3f7e9;
+    --role-badge-bg: #e3f0ff;
+    --role-badge-text: #1959a8;
+    --shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --surface: #171a21; --surface-2: #1d2129; --border: #2a2e37;
+      --text: #e5e7eb; --text-muted: #9198a4; --accent: #7fa8d9; --accent-soft: rgba(127,168,217,.15);
+      --accent-contrast: #0f1115; --danger: #e57373; --danger-soft: #3a2323; --success: #6fcf87; --success-soft: #1d2e20;
+      --role-badge-bg: #22334a; --role-badge-text: #8fbfff; --shadow: 0 1px 2px rgba(0,0,0,.3);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme='dark'] {
+    --bg: #0f1115; --surface: #171a21; --surface-2: #1d2129; --border: #2a2e37;
+    --text: #e5e7eb; --text-muted: #9198a4; --accent: #7fa8d9; --accent-soft: rgba(127,168,217,.15);
+    --accent-contrast: #0f1115; --danger: #e57373; --danger-soft: #3a2323; --success: #6fcf87; --success-soft: #1d2e20;
+    --role-badge-bg: #22334a; --role-badge-text: #8fbfff; --shadow: 0 1px 2px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+  :root[data-theme='light'] {
+    --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f1f4; --border: #e3e5ea;
+    --text: #1c1f26; --text-muted: #6b7280; --accent: #2c3e50; --accent-soft: rgba(44, 62, 80, .1);
+    --accent-contrast: #ffffff; --danger: #c0392b; --danger-soft: #fde8e8; --success: #1b7a37; --success-soft: #e3f7e9;
+    --role-badge-bg: #e3f0ff; --role-badge-text: #1959a8; --shadow: 0 1px 2px rgba(16,24,40,.05);
+    color-scheme: light;
+  }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; background: #f5f6f7; color: #1a1a1a; }
-  header.topbar { background: #2c3e50; color: #fff; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
-  header.topbar a { color: #fff; text-decoration: none; }
-  header.topbar .brand { font-weight: 600; font-size: 15px; }
-  nav.tabs { display: flex; gap: 4px; background: #34495e; padding: 0 24px; }
-  nav.tabs a { color: #d7dde3; text-decoration: none; padding: 10px 14px; font-size: 13.5px; border-bottom: 3px solid transparent; }
-  nav.tabs a.active { color: #fff; border-bottom-color: #4aa3ff; }
-  main { max-width: 1100px; margin: 24px auto; padding: 0 24px 60px; }
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 230px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .brand { display: flex; align-items: center; gap: 8px; padding: 16px 18px; text-decoration: none; color: var(--text); font-weight: 600; font-size: 13.5px; }
+  .brand img { width: 100%; height: auto; object-fit: contain; border-radius: 6px; }
+  @media (prefers-color-scheme: dark) { .brand img { background: #fff; padding: 5px 8px; } }
+  :root[data-theme='dark'] .brand img { background: #fff; padding: 5px 8px; }
+
+  .sidebar-user-row-top { padding: 0 18px 12px; border-bottom: 1px solid var(--border); }
+  .sidebar-user-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .sidebar-user { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text); text-decoration: none; min-width: 0; }
+  .sidebar-user span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sidebar-user:hover { color: var(--accent); }
+  .sidebar-user-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+  .sidebar-last-login { margin-top: 6px; font-size: 10.5px; color: var(--text-muted); }
+  .icon-btn { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 30px; height: 30px; padding: 0; margin: 0; border-radius: 6px; color: var(--text) !important; background: none; border: none; cursor: pointer; line-height: 1; }
+  .icon-btn:hover { background: var(--surface-2); color: var(--accent) !important; }
+  .icon-btn svg { display: block; width: 17px; height: 17px; flex-shrink: 0; stroke: currentColor !important; }
+
+  .nav { display: flex; flex-direction: column; gap: 2px; padding: 10px 10px; flex: 1 1 auto; }
+  .nav a.nav-link { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 7px; color: var(--text-muted); text-decoration: none; font-weight: 500; font-size: 13.5px; }
+  .nav a.nav-link:hover { background: var(--surface-2); color: var(--text); }
+  .nav a.nav-link.active { background: var(--accent-soft); color: var(--accent); }
+  .sidebar-footer { margin-top: auto; padding: 12px 18px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border); }
+
+  .content { flex: 1; min-width: 0; padding: 24px 32px 60px; overflow-x: auto; }
+  @media (max-width: 860px) {
+    .shell { flex-direction: column; }
+    .sidebar { position: static; height: auto; width: 100%; }
+    .content { padding: 16px 16px 40px; }
+  }
+
   h1 { font-size: 20px; margin: 0 0 4px; }
-  h2 { font-size: 15px; color: #34495e; margin: 28px 0 10px; }
-  .muted { color: #667; font-size: 13px; }
-  table { border-collapse: collapse; width: 100%; background: #fff; font-size: 13.5px; }
-  th, td { border: 1px solid #e1e4e8; padding: 7px 10px; text-align: left; vertical-align: middle; }
-  th { background: #eef1f4; font-weight: 600; }
-  tr:hover td { background: #f9fbfd; }
+  h2 { font-size: 15px; color: var(--text-muted); margin: 28px 0 10px; }
+  .muted { color: var(--text-muted); font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; background: var(--surface); font-size: 13.5px; }
+  th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: middle; }
+  th { background: var(--surface-2); font-weight: 600; }
+  tr:hover td { background: var(--surface-2); }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; margin: 1px; }
-  .badge.role { background: #e3f0ff; color: #1959a8; }
-  .badge.active { background: #e3f7e9; color: #1b7a37; }
-  .badge.inactive { background: #f1f1f1; color: #666; }
-  .badge.locked { background: #fde8e8; color: #b02a2a; }
+  .badge.role { background: var(--role-badge-bg); color: var(--role-badge-text); }
+  .badge.active { background: var(--success-soft); color: var(--success); }
+  .badge.inactive { background: var(--surface-2); color: var(--text-muted); }
+  .badge.locked { background: var(--danger-soft); color: var(--danger); }
   form.inline { display: inline; }
-  .card { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 16px 20px; margin-bottom: 16px; }
-  .stat-row { display: flex; gap: 16px; margin-bottom: 20px; }
-  .stat { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 14px 18px; min-width: 140px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 16px 20px; margin-bottom: 16px; }
+  .stat-row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 18px; min-width: 140px; display: block; text-decoration: none; color: var(--text); transition: border-color .15s ease, transform .15s ease; }
+  .stat:hover { border-color: var(--accent); transform: translateY(-1px); }
   .stat .n { font-size: 24px; font-weight: 700; }
-  .stat .l { font-size: 12px; color: #667; }
-  label { display: block; font-size: 12.5px; font-weight: 600; margin: 10px 0 4px; color: #34495e; }
-  input[type=text], input[type=email], input[type=password], select { width: 100%; max-width: 360px; padding: 7px 9px; border: 1px solid #ccd2d8; border-radius: 4px; font-size: 13.5px; }
-  button, input[type=submit] { background: #2c3e50; color: #fff; border: none; padding: 7px 16px; border-radius: 4px; font-size: 13px; cursor: pointer; }
-  button.secondary { background: #eef1f4; color: #2c3e50; }
-  button.danger { background: #c0392b; }
+  .stat .l { font-size: 12px; color: var(--text-muted); }
+  label { display: block; font-size: 12.5px; font-weight: 600; margin: 10px 0 4px; color: var(--text-muted); }
+  label.required::after { content: " *"; color: var(--danger); }
+  input[type=text], input[type=email], input[type=password], input[type=tel], select { width: 100%; max-width: 360px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 4px; font-size: 13.5px; background: var(--surface); color: var(--text); }
+  /* Search-style fields (e.g. Audit Log) should fill the available card
+     width and scale with the browser window, unlike ordinary name/value
+     fields which stay a fixed compact width regardless of screen size. */
+  /* The containing label carries the actual percentage width (see
+     audit.ejs/users.ejs) - this just removes the default 360px cap so the
+     input can fill whatever width that label resolves to. */
+  input[type=text].search-wide { max-width: none; }
+  /* Exact pattern from Company Portal's own .password-field/.password-toggle
+     (src/index.css) - the input keeps its normal width + border, and the
+     toggle button is absolutely positioned spanning the input's full height
+     at the right edge, rather than being a flex sibling. */
+  .pwd-wrap { position: relative; display: flex; max-width: 360px; }
+  .pwd-wrap input { max-width: none; padding-right: 34px; }
+  .pwd-toggle { position: absolute; top: 0; right: 0; bottom: 0; width: 32px; padding: 0; margin: 0; display: flex; align-items: center; justify-content: center; background: none; border: none; cursor: pointer; color: var(--text-muted) !important; line-height: 1; }
+  .pwd-toggle:hover { color: var(--accent) !important; }
+  .pwd-toggle svg { display: block; width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor !important; }
+  button, input[type=submit] { background: var(--accent); color: var(--accent-contrast); border: none; padding: 7px 16px; border-radius: 4px; font-size: 13px; cursor: pointer; }
+  button.secondary { background: var(--surface-2); color: var(--text); }
+  button.danger { background: var(--danger); color: #fff; }
   button:hover { opacity: 0.9; }
-  .error { background: #fde8e8; color: #a02020; padding: 8px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 12px; }
-  .perm-matrix td.app-header { background: #2c3e50; color: #fff; font-weight: 600; }
+  .error { background: var(--danger-soft); color: var(--danger); padding: 8px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 12px; }
+  .perm-matrix td.app-header { background: var(--accent); color: var(--accent-contrast); font-weight: 600; }
   .perm-matrix input[type=checkbox] { width: 16px; height: 16px; }
-  a.button-link { display: inline-block; background: #2c3e50; color: #fff; text-decoration: none; padding: 6px 14px; border-radius: 4px; font-size: 13px; }
+  a.button-link { display: inline-block; background: var(--accent); color: var(--accent-contrast); text-decoration: none; padding: 6px 14px; border-radius: 4px; font-size: 13px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 100; }
+  .modal-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px 24px; max-width: 400px; width: 90%; box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+  .modal-box p { margin: 0 0 18px; color: var(--text); font-size: 14px; line-height: 1.4; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>
 </head>
 <body>
-<header class="topbar">
-  <span class="brand">Syncaxis IAM Admin</span>
-  <span>
-    <% if (typeof authUser !== 'undefined' && authUser) { %>
-      <a href="/admin-ui/account" style="color:#fff;<%= active === 'account' ? 'text-decoration:underline;' : '' %>"><%= authUser.displayName %></a> &nbsp;
-      <form class="inline" method="post" action="/admin-ui/logout"><button class="secondary" type="submit">Log out</button></form>
-    <% } %>
-  </span>
-</header>
+<div class="shell">
 <% if (typeof authUser !== 'undefined' && authUser) { %>
-<nav class="tabs">
-  <a href="/admin-ui" class="<%= active === 'dashboard' ? 'active' : '' %>">Dashboard</a>
-  <a href="/admin-ui/users" class="<%= active === 'users' ? 'active' : '' %>">Users</a>
-  <a href="/admin-ui/roles" class="<%= active === 'roles' ? 'active' : '' %>">Roles</a>
-  <a href="/admin-ui/groups" class="<%= active === 'groups' ? 'active' : '' %>">Groups</a>
-  <a href="/admin-ui/apps" class="<%= active === 'apps' ? 'active' : '' %>">Apps &amp; Permissions</a>
-  <a href="/admin-ui/audit" class="<%= active === 'audit' ? 'active' : '' %>">Audit Log</a>
-</nav>
+<aside class="sidebar">
+  <a class="brand" href="/admin-ui">
+    <img src="/admin-ui/assets/logo.png" alt="Syncaxis" />
+  </a>
+  <div class="sidebar-user-row-top">
+    <div class="sidebar-user-row">
+      <a class="sidebar-user" href="/admin-ui/account" title="<%= authUser.displayName %>">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span><%= authUser.displayName %></span>
+      </a>
+      <span class="sidebar-user-actions">
+        <button type="button" id="themeToggleBtn" class="icon-btn" title="Theme"></button>
+        <form class="inline" method="post" action="/admin-ui/logout">
+          <button type="submit" class="icon-btn" title="Log out" aria-label="Log out">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
+        </form>
+      </span>
+    </div>
+    <div class="sidebar-last-login">Last login: <%= authUser.lastLoginAt ? new Date(authUser.lastLoginAt).toLocaleString() : 'never' %></div>
+  </div>
+  <nav class="nav">
+    <a class="nav-link <%= active === 'dashboard' ? 'active' : '' %>" href="/admin-ui">Dashboard</a>
+    <a class="nav-link <%= active === 'users' ? 'active' : '' %>" href="/admin-ui/users">Users</a>
+    <a class="nav-link <%= active === 'roles' ? 'active' : '' %>" href="/admin-ui/roles">Roles</a>
+    <a class="nav-link <%= active === 'groups' ? 'active' : '' %>" href="/admin-ui/groups">Groups</a>
+    <a class="nav-link <%= active === 'apps' ? 'active' : '' %>" href="/admin-ui/apps">Apps &amp; Permissions</a>
+    <a class="nav-link <%= active === 'audit' ? 'active' : '' %>" href="/admin-ui/audit">Audit Log</a>
+  </nav>
+  <div class="sidebar-footer">Syncaxis IAM Admin</div>
+</aside>
 <% } %>
-<main>
+<main class="content">
 <h1><%= title %></h1>

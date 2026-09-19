@@ -47,6 +47,10 @@ export function createApp() {
 
   app.set('view engine', 'ejs');
   app.set('views', path.join(__dirname, 'admin-ui', 'views'));
+  // Logo/favicon - served unauthenticated since the login page itself needs
+  // the logo before any session exists. img-src 'self' (Helmet's default)
+  // already covers same-origin static assets, no CSP change needed.
+  app.use('/admin-ui/assets', express.static(path.join(__dirname, 'admin-ui', 'public')));
 
   // Login throttling (architecture doc §12) - per-IP on top of the
   // per-username lockout already enforced in lib/authenticate.ts.

@@ -3,22 +3,30 @@
 <% if (typeof error !== 'undefined' && error) { %><div class="error"><%= error %></div><% } %>
 
 <div class="card">
-  <form method="post" action="/admin-ui/apps/<%= app.Key %>/edit">
+  <div style="display:flex; align-items:center; justify-content:space-between;">
+    <h2 style="margin-top:0;">Details</h2>
+    <div>
+      <button type="button" id="editBtn">Edit</button>
+      <button type="submit" form="appEditForm" id="saveBtn" style="display:none;">Save</button>
+      <button type="button" id="cancelBtn" class="secondary" style="display:none;">Cancel</button>
+    </div>
+  </div>
+  <form method="post" action="/admin-ui/apps/<%= app.Key %>/edit" id="appEditForm">
     <label>Key</label>
     <input type="text" value="<%= app.Key %>" disabled />
     <p class="muted" style="margin:4px 0 0;">Immutable — every permission key this app has declared is namespaced under it (e.g. <code><%= app.Key %>.leads.view</code>). Register a new app instead if this needs to change.</p>
 
-    <label>Name</label>
-    <input type="text" name="name" value="<%= app.Name %>" required />
+    <label class="required">Name</label>
+    <input type="text" name="name" value="<%= app.Name %>" required disabled class="editable-field" />
 
     <label>Base URL</label>
-    <input type="text" name="baseUrl" value="<%= app.BaseUrl || '' %>" placeholder="https://..." />
+    <input type="text" name="baseUrl" value="<%= app.BaseUrl || '' %>" placeholder="https://..." disabled class="editable-field" />
 
-    <label style="display:inline-flex;align-items:center;gap:6px;margin-top:14px;">
-      <input type="checkbox" name="isActive" value="true" <%= app.IsActive ? 'checked' : '' %> style="width:auto;" /> Active
-    </label>
-
-    <div><button type="submit" style="margin-top:16px;">Save</button> <a href="/admin-ui/apps" class="muted" style="margin-left:10px;">Cancel</a></div>
+    <div style="margin-top:14px;">
+      <label style="display:inline-flex;align-items:center;gap:6px;">
+        <input type="checkbox" name="isActive" value="true" <%= app.IsActive ? 'checked' : '' %> style="width:auto;" disabled class="editable-field" /> Active
+      </label>
+    </div>
   </form>
 </div>
 
@@ -31,9 +39,25 @@
 </div>
 
 <script nonce="<%= cspNonce %>">
-  document.getElementById('deleteAppForm').addEventListener('submit', function (e) {
-    if (!confirm('Delete this app and all its declared permission keys? This cannot be undone.')) e.preventDefault();
+  var deleteAppForm = document.getElementById('deleteAppForm');
+  deleteAppForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    window.confirmModal('Delete this app and all its declared permission keys? This cannot be undone.').then(function (ok) {
+      if (ok) deleteAppForm.submit();
+    });
   });
+
+  var editBtn = document.getElementById('editBtn');
+  var saveBtn = document.getElementById('saveBtn');
+  var cancelBtn = document.getElementById('cancelBtn');
+  var editableFields = document.querySelectorAll('.editable-field');
+  editBtn.addEventListener('click', function () {
+    editableFields.forEach(function (el) { el.disabled = false; });
+    editBtn.style.display = 'none';
+    saveBtn.style.display = '';
+    cancelBtn.style.display = '';
+  });
+  cancelBtn.addEventListener('click', function () { location.reload(); });
 </script>
 
 <%- include('partials/footer') %>

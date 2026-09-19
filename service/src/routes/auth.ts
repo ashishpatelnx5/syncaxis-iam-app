@@ -1,5 +1,4 @@
 import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { getPool, sql } from '../config/db';
@@ -8,22 +7,10 @@ import { requireAuth } from '../middleware/auth';
 import { writeAuditLog, clientIp } from '../lib/audit';
 import { getEffectiveAccess, EffectiveAccess } from '../lib/permissions';
 import { attemptLogin } from '../lib/authenticate';
+import { consumeSsoCode, issueSsoCode } from '../lib/ssoCodes';
 
 const router = Router();
 const MIN_PASSWORD_LENGTH = 8; // architecture doc §16.5
-
-// Short-lived, single-use SSO handoff codes (architecture doc §4.2) - same
-// mechanism Company Portal already proved out for its own tile-click SSO.
-// In-memory only: an app restart just means anyone mid-handoff clicks the
-// tile again, which is an acceptable tradeoff at this scale (§9.4).
-const ssoCodes = new Map<string, { userId: number; expiresAt: number }>();
-
-function sweepExpiredSsoCodes(): void {
-  const now = Date.now();
-  for (const [code, entry] of ssoCodes) {
-    if (entry.expiresAt < now) ssoCodes.delete(code);
-  }
-}
 
 function signToken(userId: number, username: string): string {
   return jwt.sign({ sub: userId, username }, env.jwtSecret, { expiresIn: env.jwtExpiresIn } as jwt.SignOptions);
@@ -35,6 +22,8 @@ interface PublicUserRow {
   DisplayName: string | null;
   IsActive: boolean;
   LastLoginAt: Date | null;
+  PasswordChangedAt: Date | null;
+  MustChangePassword: boolean;
 }
 
 function toUserSummary(user: PublicUserRow, access: EffectiveAccess) {
@@ -47,6 +36,8 @@ function toUserSummary(user: PublicUserRow, access: EffectiveAccess) {
     perms: [...access.perms],
     isFullAccess: access.isFullAccess,
     lastLoginAt: user.LastLoginAt ? new Date(user.LastLoginAt).toISOString() : null,
+    passwordChangedAt: user.PasswordChangedAt ? new Date(user.PasswordChangedAt).toISOString() : null,
+    mustChangePassword: Boolean(user.MustChangePassword),
   };
 }
 
@@ -69,7 +60,7 @@ router.post('/login', async (req, res, next) => {
     const result = await pool
       .request()
       .input('id', sql.Int, outcome.userId)
-      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt FROM Users WHERE UserId = @id');
+      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt, PasswordChangedAt, MustChangePassword FROM Users WHERE UserId = @id');
     const user = result.recordset[0];
     const access = await getEffectiveAccess(pool, user.UserId);
 
@@ -87,9 +78,7 @@ router.post('/login', async (req, res, next) => {
 // browser to another app's tile URL (architecture doc §4.2).
 router.post('/sso/issue', requireAuth, async (req, res, next) => {
   try {
-    sweepExpiredSsoCodes();
-    const code = crypto.randomBytes(32).toString('hex');
-    ssoCodes.set(code, { userId: req.authUser!.id, expiresAt: Date.now() + env.ssoCodeTtlSeconds * 1000 });
+    const code = issueSsoCode(req.authUser!.id);
     await writeAuditLog({ userId: req.authUser!.id, eventType: 'SSO_ISSUE', ipAddress: clientIp(req) });
     res.json({ code });
   } catch (err) {
@@ -103,10 +92,9 @@ router.post('/sso/issue', requireAuth, async (req, res, next) => {
 router.post('/sso/exchange', async (req, res, next) => {
   try {
     const { code } = req.body || {};
-    const entry = code ? ssoCodes.get(code) : null;
-    if (code) ssoCodes.delete(code);
+    const userId = code ? consumeSsoCode(code) : null;
 
-    if (!entry || entry.expiresAt < Date.now()) {
+    if (!userId) {
       res.status(401).json({ error: 'This sign-in link has expired - please try again from the originating app.' });
       return;
     }
@@ -114,8 +102,8 @@ router.post('/sso/exchange', async (req, res, next) => {
     const pool = await getPool();
     const result = await pool
       .request()
-      .input('id', sql.Int, entry.userId)
-      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt FROM Users WHERE UserId = @id');
+      .input('id', sql.Int, userId)
+      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt, PasswordChangedAt, MustChangePassword FROM Users WHERE UserId = @id');
 
     const user = result.recordset[0];
     if (!user || !user.IsActive) {
@@ -143,7 +131,7 @@ router.get('/me', requireAuth, async (req, res, next) => {
     const result = await pool
       .request()
       .input('id', sql.Int, req.authUser!.id)
-      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt FROM Users WHERE UserId = @id');
+      .query<PublicUserRow>('SELECT UserId, Username, DisplayName, IsActive, LastLoginAt, PasswordChangedAt, MustChangePassword FROM Users WHERE UserId = @id');
 
     const user = result.recordset[0];
     const access = await getEffectiveAccess(pool, req.authUser!.id);
@@ -184,12 +172,20 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
       return;
     }
 
+    const sameAsCurrent = await bcrypt.compare(newPassword, row.PasswordHash);
+    if (sameAsCurrent) {
+      res.status(400).json({ error: 'New password must be different from your current password.' });
+      return;
+    }
+
     const passwordHash = await bcrypt.hash(newPassword, 12);
     await pool
       .request()
       .input('id', sql.Int, req.authUser!.id)
       .input('passwordHash', sql.NVarChar(255), passwordHash)
-      .query('UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME() WHERE UserId = @id');
+      .query(
+        'UPDATE Users SET PasswordHash = @passwordHash, PasswordChangedAt = SYSUTCDATETIME(), TokenValidAfter = SYSUTCDATETIME(), MustChangePassword = 0 WHERE UserId = @id',
+      );
 
     await writeAuditLog({ userId: req.authUser!.id, eventType: 'PASSWORD_CHANGED', ipAddress: clientIp(req) });
     res.status(204).end();

@@ -4,27 +4,32 @@
   <h2 style="margin-top:0;">Register an app manually</h2>
   <p class="muted">Apps normally self-register via <code>POST /admin/apps</code> at startup — use this only for a one-off manual entry.</p>
   <form method="post" action="/admin-ui/apps">
-    <label style="display:inline-block;margin-right:12px;">Key <input type="text" name="key" placeholder="e.g. crm" required /></label>
-    <label style="display:inline-block;margin-right:12px;">Name <input type="text" name="name" required /></label>
+    <label style="display:inline-block;margin-right:12px;">Key <span style="color:#c0392b;">*</span> <input type="text" name="key" placeholder="e.g. crm" required /></label>
+    <label style="display:inline-block;margin-right:12px;">Name <span style="color:#c0392b;">*</span> <input type="text" name="name" required /></label>
     <label style="display:inline-block;">Base URL <input type="text" name="baseUrl" placeholder="https://..." /></label>
     <button type="submit" style="margin-left:8px;">Register</button>
   </form>
 </div>
 
 <table>
-  <thead><tr><th>Key</th><th>Name</th><th>Base URL</th><th>Status</th><th>Permission keys declared</th><th></th></tr></thead>
+  <thead><tr><th>Key</th><th>Name</th><th>Base URL</th><th>Status</th><th>Permission keys declared</th></tr></thead>
   <tbody>
   <% apps.forEach(function(a) { %>
-    <tr>
+    <tr class="row-link" data-href="/admin-ui/apps/<%= a.Key %>/edit" style="cursor:pointer;">
       <td><code><%= a.Key %></code></td>
       <td><%= a.Name %></td>
       <td class="muted"><%= a.BaseUrl || '' %></td>
       <td><% if (a.IsActive) { %><span class="badge active">Active</span><% } else { %><span class="badge inactive">Inactive</span><% } %></td>
       <td><%= a.PermissionCount %></td>
-      <td><a href="/admin-ui/apps/<%= a.Key %>/edit">Edit</a></td>
     </tr>
   <% }) %>
   </tbody>
 </table>
+
+<script nonce="<%= cspNonce %>">
+  document.querySelectorAll('tr.row-link').forEach(function (row) {
+    row.addEventListener('click', function () { location.href = row.dataset.href; });
+  });
+</script>
 
 <%- include('partials/footer') %>

@@ -1,28 +1,25 @@
 <%- include('partials/header', { title: 'Audit Log', active: 'audit', authUser }) %>
 
 <div class="card">
-  <form method="get" action="/admin-ui/audit">
-    <label style="display:inline-block;margin-right:12px;">Event type
-      <input type="text" name="eventType" value="<%= filters.eventType || '' %>" placeholder="e.g. LOGIN_FAILURE" />
+  <form method="get" action="/admin-ui/audit" style="display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+    <label style="margin:0; width:66%;">Search
+      <input type="text" name="search" class="search-wide" value="<%= filters.search || '' %>" placeholder="event, app, user, IP, or detail" />
     </label>
-    <label style="display:inline-block;margin-right:12px;">App key
-      <input type="text" name="appKey" value="<%= filters.appKey || '' %>" />
-    </label>
-    <button type="submit">Filter</button>
+    <button type="submit">Search</button>
   </form>
 </div>
 
 <table>
-  <thead><tr><th>When</th><th>Event</th><th>User</th><th>App</th><th>Detail</th><th>IP</th></tr></thead>
+  <thead><tr><th>When</th><th>Event</th><th>User</th><th>App</th><th>IP</th><th>Detail</th></tr></thead>
   <tbody>
   <% entries.forEach(function(e) { %>
     <tr>
       <td class="muted"><%= new Date(e.CreatedAt).toLocaleString() %></td>
       <td><%= e.EventType %></td>
       <td><%= e.Username || '—' %></td>
-      <td><%= e.AppKey || '—' %></td>
-      <td class="muted"><%= e.Detail || '' %></td>
+      <td><%= e.AppName || e.AppKey || '—' %></td>
       <td class="muted"><%= e.IpAddress || '' %></td>
+      <td class="muted"><%= e.Detail || '' %></td>
     </tr>
   <% }) %>
   <% if (entries.length === 0) { %><tr><td colspan="6" class="muted">No matching events.</td></tr><% } %>
