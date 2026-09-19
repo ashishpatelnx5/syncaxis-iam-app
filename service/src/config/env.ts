@@ -20,6 +20,11 @@ const { server, instanceName } = parseServer(required('DB_SERVER'));
 
 export const env = {
   port: Number(process.env.PORT) || 4100,
+  // Only set true once the service is actually served over HTTPS. Its CSP
+  // "upgrade-insecure-requests" makes browsers rewrite the page's logo/CSS/
+  // form posts to https:// - on a plain-http server (except localhost, which
+  // browsers exempt) that breaks images and login for every remote user.
+  httpsOnly: process.env.HTTPS_ONLY === 'true',
   db: {
     server,
     instanceName,
